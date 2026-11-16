@@ -1,0 +1,21 @@
+{
+  "name": "earning-bots",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Earning Bots: worker bots that make products to sell, with an earnings report",
+  "scripts": {
+    "vendor": "mkdir -p www/vendor && cp node_modules/jspdf/dist/jspdf.umd.min.js node_modules/jszip/dist/jszip.min.js www/vendor/",
+    "sync": "npm run vendor && npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/share": "^8.0.3",
+    "jspdf": "^4.2.1",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2"
+  }
+}

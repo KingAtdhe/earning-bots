@@ -1,0 +1,14 @@
+{
+  "dashboard": {"host": "127.0.0.1", "port": 8080},
+  "etsy": {
+    "keystring": "",
+    "shared_secret": "",
+    "redirect_uri": "http://localhost:8765/callback",
+    "taxonomy_id": null,
+    "activate_on_approve": true
+  },
+  "gumroad": {"access_token": "", "currency": "USD"},
+  "bots": {
+    "product_factory": {"per_run": 3, "image_width": 2000, "price_overrides": {}}
+  }
+}

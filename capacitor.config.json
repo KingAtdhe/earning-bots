@@ -1,0 +1,6 @@
+{
+  "appId": "eu.earningbots.app",
+  "appName": "Earning Bots",
+  "webDir": "www",
+  "plugins": { "CapacitorHttp": { "enabled": true } }
+}
