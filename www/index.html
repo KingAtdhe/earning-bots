@@ -5,58 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1f3d33">
 <title>Earning Bots</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Inter:wght@400;500;600;700&display=swap">
-<style>
-  :root { --bg:#f3f1ea; --card:#fff; --ink:#1d2320; --muted:#6b716d; --brand:#1f3d33; --brand2:#2f6b55; --line:#e4e1d8;
-    --ok:#d7efdf; --err:#f8dcd5; --run:#fbefc4; }
-  * { box-sizing:border-box; }
-  html,body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 Inter, system-ui, -apple-system, Roboto, sans-serif; }
-  #app { max-width:720px; margin:0 auto; padding:calc(env(safe-area-inset-top) + 14px) 14px calc(env(safe-area-inset-bottom) + 40px); }
-  header { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; margin:4px 2px 14px; }
-  h1 { font:600 28px/1.1 Fraunces, Georgia, serif; margin:0; color:var(--brand); }
-  h3 { margin:0 0 10px; font-size:15px; }
-  .total { text-align:right; } .total b { display:block; font-size:20px; }
-  nav { display:flex; gap:6px; overflow-x:auto; margin:0 -14px 14px; padding:0 14px; scrollbar-width:none; }
-  nav button { flex:none; background:transparent; color:var(--muted); border:1px solid var(--line); }
-  nav button.on { background:var(--brand); color:#fff; border-color:var(--brand); }
-  .card { background:var(--card); border-radius:16px; padding:14px; margin-bottom:12px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
-  .row { display:flex; gap:10px; } .row > .card { flex:1; min-width:0; }
-  .stats b { display:block; font-size:19px; margin-top:2px; }
-  .muted { color:var(--muted); } .small { font-size:13px; } .center { text-align:center; }
-  button, .filebtn { font:600 14px Inter, system-ui, sans-serif; border:0; border-radius:12px; padding:10px 14px; background:var(--brand2); color:#fff; cursor:pointer; display:inline-block; }
-  button:disabled { opacity:.6; }
-  button.ghost, .filebtn.ghost { background:#ecebe4; color:var(--ink); }
-  button.wide { width:100%; margin-bottom:12px; padding:13px; background:var(--brand); }
-  button.x { background:none; color:var(--muted); padding:0 6px; font-size:20px; line-height:1; }
-  .btns { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-  .ph { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
-  .bot > button { margin-top:10px; }
-  .pill { flex:none; font-size:12px; font-weight:600; border-radius:99px; padding:3px 9px; background:#eee; }
-  .pill.ok, .pill.listed { background:var(--ok); } .pill.error { background:var(--err); } .pill.run, .pill.approved { background:var(--run); }
-  img.cover { width:100%; aspect-ratio:5/4; object-fit:cover; border-radius:12px; display:block; margin:10px 0; background:#e8e6de; }
-  details { margin-top:6px; } summary { cursor:pointer; color:var(--brand2); font-weight:600; font-size:14px; }
-  pre { white-space:pre-wrap; font:13px/1.45 Inter, system-ui, sans-serif; color:var(--muted); background:#f7f6f1; padding:10px; border-radius:10px; }
-  p.t { font-weight:600; font-size:14px; }
-  .notice { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; background:#fff7d9; border-radius:12px; padding:10px 12px; margin-bottom:12px; font-size:14px; }
-  label { display:block; font-size:13px; color:var(--muted); margin:8px 0; }
-  input, select, textarea { display:block; width:100%; margin-top:4px; font:15px Inter, system-ui, sans-serif; padding:10px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink); }
-  .grid { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
-  table { width:100%; border-collapse:collapse; font-size:14px; }
-  td { padding:7px 0; border-bottom:1px solid var(--line); vertical-align:top; } td:last-child { text-align:right; white-space:nowrap; padding-left:10px; }
-  tr:last-child td { border-bottom:0; }
-  form.listed { margin-top:6px; border-top:1px solid var(--line); padding-top:4px; }
-  #copybox { position:fixed; inset:0; background:rgba(0,0,0,.4); display:flex; align-items:center; justify-content:center; padding:20px; z-index:10; }
-  #copybox[hidden] { display:none; }
-  #copybox .card { width:100%; max-width:520px; } #copybox textarea { height:220px; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div id="app"></div>
-<div id="copybox" hidden><div class="card"><h3>Copy</h3><p class="muted small">Select the text and copy it.</p><textarea readonly></textarea><div class="btns"><button>Done</button></div></div></div>
+<main id="view"></main>
+<nav id="nav" aria-label="Sections"></nav>
+<div id="sheet"></div>
+<div id="toasts" role="status" aria-live="polite"></div>
 <script src="vendor/jspdf.umd.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
+<script src="core.js"></script>
 <script src="designs.js"></script>
-<script src="app.js"></script>
+<script src="puzzles.js"></script>
+<script src="media.js"></script>
+<script src="bots.js"></script>
+<script src="ui.js"></script>
 </body>
 </html>
