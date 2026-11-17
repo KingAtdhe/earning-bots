@@ -197,3 +197,18 @@ form.links { border-top: 1px solid var(--line); margin-top: 16px; }
 @media (min-width: 640px) { .stats { gap: 12px; } .stat b { font-size: 26px; } }
 @media (max-width: 370px) { .stats { grid-template-columns: repeat(2, 1fr); } }
 .list .row .tile { display: grid; color: var(--brand); } [data-theme="dark"] .list .row .tile { color: var(--gold); }
+.autopilot { display: block; }
+.autopilot.on { outline: 2px solid var(--gold); }
+.ap-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.ap-head b { display: block; font-size: 16px; } .ap-head span { color: var(--muted); font-size: 13px; }
+.switch { width: 52px; height: 30px; border-radius: 99px; background: var(--surface2); padding: 3px; justify-content: flex-start; flex: none; transition: background .2s; }
+.switch i { width: 24px; height: 24px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .2s; }
+.switch.on { background: var(--ok); } .switch.on i { transform: translateX(22px); }
+label.check { display: flex; gap: 10px; align-items: flex-start; color: var(--ink); font-size: 14px; }
+label.check input { width: 20px; height: 20px; margin: 1px 0 0; flex: none; accent-color: var(--brand2); }
+.kpis.inline { background: var(--surface); border-radius: 14px; padding: 12px; margin: 10px 0; border: 1px solid var(--line); }
+.kpis.inline b { font-size: 17px; } .kpis.inline span { color: var(--muted); }
+.list.mini { background: var(--surface); border-radius: 14px; border: 1px solid var(--line); margin-bottom: 8px; }
+.list.mini .row { padding: 9px 12px; } .list.mini .row span { white-space: normal; }
+.errtext { color: var(--err) !important; }
+.thumb.wallart, .thumb.kdpbook, .thumb.worksheet, .thumb.ebook, .thumb.pin { object-position: top; }

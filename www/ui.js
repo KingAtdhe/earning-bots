@@ -5,7 +5,7 @@
   const { BOTS, KINDS, PLATFORMS } = window.EB_BOTS;
   const M = window.EB_MEDIA;
   const S = Store.S, esc = U.esc;
-  const VERSION = "2.0";
+  const VERSION = "3.0";
 
   const ICONS = {
     home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
@@ -25,6 +25,9 @@
     briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5h6v2"/><path d="M3 13h18"/>', tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8" r="1.3"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>', plus: '<path d="M12 5v14M5 12h14"/>', trash: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
     bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>', clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+    image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>', pin: '<path d="M12 21v-6"/><path d="M8 4h8l-1 6 3 3H6l3-3z"/>',
+    maze: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v8h6M17 21v-8h-6M11 7h6M7 17h4"/>', palette: '<path d="M12 3a9 9 0 100 18c1.5 0 2-1 2-2s-1-1.5-1-2.5 1-1.5 2-1.5h2a4 4 0 004-4c0-4.4-4-8-9-8z"/><circle cx="7.5" cy="11" r="1.2"/><circle cx="10" cy="7" r="1.2"/><circle cx="15" cy="7.5" r="1.2"/>',
+    notebook: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v18M3 7h4M3 12h4M3 17h4"/>', pencil: '<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/>', chat: '<path d="M4 5h16v11H9l-5 4z"/>',
     sync: '<path d="M20 11a8 8 0 00-14.9-3"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0014.9 3"/><path d="M20 20v-4h-4"/>', back: '<path d="M15 5l-7 7 7 7"/>', edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
   };
   const ic = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n] || ICONS.file}</svg>`;
@@ -58,7 +61,7 @@
     const t = { id: U.uid(), msg, kind }; ui.toasts.push(t); renderToasts();
     setTimeout(() => { ui.toasts = ui.toasts.filter(x => x !== t); renderToasts(); }, kind === "error" ? 7000 : 4200);
   }
-  Object.assign(window.EB_APP, { toast, copyBox });
+  Object.assign(window.EB_APP, { toast, copyBox, closeSheet: () => closeSheet(), refresh: () => { render(); renderSheet(); }, syncGumroad: q => syncGumroad(q) });
 
   function copyBox(text, label) {
     openSheet({ type: "copy", text, label });
@@ -91,17 +94,18 @@
     if (miss) { if (!quiet) toast(miss, "error"); return; }
     ui.running[bot.id] = "Starting..."; render();
     const c = botCfg(bot), started = U.now();
-    let made = 0;
+    let made = 0; const newIds = [];
     const ctx = {
       cfg: c,
       progress: m => { ui.running[bot.id] = m; document.querySelectorAll(`[data-progress="${bot.id}"]`).forEach(el => { el.textContent = m; }); },
       add: async (kind, title, data, o = {}) => {
-        const id = o.id || `${kind}-${U.uid()}`; made++;
+        const id = o.id || `${kind}-${U.uid()}`; made++; newIds.push(id);
         await Store.save("items", id, { id, bot: bot.id, kind, title: U.clampStr(title, 160), status: o.status || "pending", createdAt: U.now(), price: o.price ?? null, data, links: {} });
       },
     };
     let summary, status = "ok";
     try { summary = await bot.run(ctx); } catch (e) { status = "error"; summary = "Failed: " + (e.message || e); }
+    if (newIds.length) { try { ctx.progress("Checking and automating..."); const extra = await window.EB_AUTO.afterRun(bot, newIds); if (extra) summary += ` (${extra})`; } catch (e) { summary += ` (automation: ${e.message})`; } }
     delete ui.running[bot.id];
     await Store.save("runs", U.uid(), { bot: bot.id, startedAt: started, finishedAt: U.now(), status, summary, made });
     const runs = Object.entries(S.runs).sort((a, b) => b[1].startedAt.localeCompare(a[1].startedAt));
@@ -122,6 +126,7 @@
       const last = lastRun(b.id); if (last && Date.now() - Date.parse(last.startedAt) < hours * 3600e3) continue;
       runBot(b, true); break;
     }
+    window.EB_AUTO.periodic().catch(() => {});
   }
 
   // ---- money ---------------------------------------------------------------------------------
@@ -186,6 +191,7 @@
         <button class="stat" data-go="library:listed"><b>${listed.length}</b><span>Live</span></button>
         <button class="stat" data-go="library:leads"><b>${leads.length}</b><span>Leads & jobs</span></button>
       </div>
+      ${window.EB_AUTO.homeCard()}
       <button class="primary wide" data-act="run-all">${ic("bolt")} ${running.length ? `Running ${running.length} bot${running.length > 1 ? "s" : ""}...` : "Run all bots"}</button>
       ${steps.length ? `<h2>Next steps</h2><div class="card list">${steps.map(([go, t, s]) => `<button class="row" data-go="${go}"><span class="dot"></span><div><b>${esc(t)}</b><span>${esc(s)}</span></div>${ic("back", "chev")}</button>`).join("")}</div>` : ""}
       <h2>Activity</h2>
@@ -237,15 +243,15 @@
         : `<div class="emptystate">${ic("inbox")}<b>Nothing to review</b><span>New work from your bots lands here.</span><button class="primary" data-tab="bots">${ic("play")}Run a bot</button></div>`}`;
   }
 
-  const LIB_FILTERS = [["all", "All"], ["printable", "Printables"], ["puzzlebook", "Books"], ["design", "Designs"], ["content", "Posts"], ["article", "Articles"], ["lead", "Leads"], ["opportunity", "Jobs"], ["deal", "Deals"]];
+  const LIB_FILTERS = [["all", "All"], ["products", "Printables & art"], ["books", "Books"], ["design", "Designs"], ["content", "Content"], ["leads", "Leads & jobs"], ["deal", "Deals"]];
+  const GROUPS = { products: ["printable", "wallart", "worksheet"], books: ["puzzlebook", "kdpbook", "ebook"], design: ["design"], content: ["content", "article", "post", "pin"], leads: ["lead", "opportunity", "gig"], deal: ["deal"] };
   function viewLibrary() {
     let list = items().filter(i => i.status !== "pending" && i.status !== "rejected");
-    if (ui.libKind === "leads") list = list.filter(i => pipelineKinds.includes(i.kind));
-    else if (ui.libKind !== "all") list = list.filter(i => i.kind === ui.libKind);
+    if (ui.libKind !== "all") list = list.filter(i => (GROUPS[ui.libKind] || [ui.libKind]).includes(i.kind));
     if (ui.libStatus !== "all") list = list.filter(i => i.status === ui.libStatus);
     if (ui.search) { const q = ui.search.toLowerCase(); list = list.filter(i => (i.title + " " + JSON.stringify(i.data.tags || "")).toLowerCase().includes(q)); }
     list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    const kindsHere = ui.libKind === "all" || ui.libKind === "leads" ? null : KINDS[ui.libKind];
+    const kindsHere = (GROUPS[ui.libKind] || []).length === 1 ? KINDS[GROUPS[ui.libKind][0]] : null;
     const statuses = kindsHere && kindsHere.pipeline ? kindsHere.pipeline : ui.libKind === "leads" ? ["new", "contacted", "applied", "won", "lost"] : ["approved", "listed"];
     const labels = { approved: "To list", listed: "Live", new: "New", contacted: "Contacted", applied: "Applied", won: "Won", lost: "Lost", bought: "Bought", sold: "Sold", skipped: "Skipped" };
     return `${header("Library", `${list.length} item${list.length === 1 ? "" : "s"}`)}
@@ -268,7 +274,7 @@
         <div class="kpis"><div><b>${rep.count}</b><span>sales</span></div><div><b>${U.fmt(avg, cur)}</b><span>average</span></div><div><b>${U.fmt(monthTotal(), cur)}</b><span>this month</span></div></div>
         ${barChart(rep.daily, ui.period || 90)}</section>
       <div class="btns spread"><button class="primary" data-act="add-sale">${ic("plus")}Log a sale</button>
-        ${IS_NATIVE ? `<button class="ghost" data-act="sync-gumroad">${ic("sync")}Sync Gumroad</button>` : ""}
+        ${IS_NATIVE ? `<button class="ghost" data-act="sync-gumroad">${ic("sync")}Sync sales</button>` : ""}
         <button class="ghost" data-act="export-csv">${ic("download")}CSV</button></div>
       ${Object.keys(rep.byBot).length ? `<h2>By bot</h2><div class="card">${bars(rep.byBot, k => botById(k)?.title || (k === "manual" ? "Not linked" : k))}</div>` : ""}
       ${Object.keys(rep.byPlat).length ? `<h2>By platform</h2><div class="card">${bars(rep.byPlat, k => k)}</div>` : ""}
@@ -312,7 +318,7 @@
     return `<div class="sheet-head"><span class="kindtag">${ic(k.icon)}${esc(k.label || it.kind)}</span><button class="iconbtn" data-act="close" aria-label="Close">${ic("x")}</button></div>
       <h2 class="sheet-title">${esc(it.title)}</h2>
       <p class="muted">${esc(statusLabel)} · by ${esc(b ? b.title : it.bot)} · ${U.ago(it.createdAt)}${it.price ? ` · ${Number(it.price).toFixed(2)}` : ""}</p>
-      ${pipeline}<div class="btns wrap">${acts.join("")}${sold}</div>${body}${links}
+      ${pipeline}<div class="btns wrap">${window.EB_AUTO.itemActions(it)}${acts.join("")}${sold}</div>${body}${links}
       <button class="danger-link" data-act="delete-item" data-id="${esc(it.id)}">${ic("trash")}Delete</button>`;
   }
 
@@ -329,10 +335,19 @@
       <form class="addwatch"><label>Product link<input name="url" type="url" required placeholder="https://..."></label><div class="two"><label>Name<input name="name" placeholder="e.g. Nike Air Max 90"></label><label>Buy at or below<input name="target" type="number" step="0.01" required></label></div><div class="two"><label>Resale price (optional)<input name="resell" type="number" step="0.01"></label><label>Currency<input name="currency" value="${esc(currency())}"></label></div><button class="ghost">${ic("plus")}Add product</button></form>` : "";
     return `<div class="sheet-head"><span class="kindtag">${ic(b.icon)}Bot settings</span><button class="iconbtn" data-act="close" aria-label="Close">${ic("x")}</button></div>
       <h2 class="sheet-title">${esc(b.title)}</h2><p class="muted">${esc(b.desc)}</p>
-      <form class="botform" data-bot="${b.id}">${fields}
+      ${botStats(b)}
+      <form class="botform" data-bot="${b.id}">${fields}${window.EB_AUTO.approveField(b)}
         <label>Autopilot<select name="auto">${[[0, "Off: only when I tap Run"], [1, "Every hour"], [6, "Every 6 hours"], [12, "Every 12 hours"], [24, "Once a day"]].map(([h, l]) => `<option value="${h}" ${String(auto) === String(h) ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <p class="hint">Autopilot runs while the app is open. New work still waits in your Inbox.</p>
         <button class="primary wide">Save</button></form>${watches}`;
+  }
+
+  function botStats(b) {
+    const mine = items().filter(i => i.bot === b.id), ok = mine.filter(i => !["pending", "rejected"].includes(i.status)).length;
+    const earned = {}; Object.values(S.earnings).forEach(r => { const it = S.items[r.itemId]; if (it && it.bot === b.id) earned[r.currency] = (earned[r.currency] || 0) + r.amountCents; });
+    const runs = Object.values(S.runs).filter(r => r.bot === b.id).sort((x, y) => y.startedAt.localeCompare(x.startedAt)).slice(0, 4);
+    return `<div class="kpis inline"><div><b>${mine.length}</b><span>made</span></div><div><b>${mine.length ? Math.round(ok / mine.length * 100) : 0}%</b><span>approved</span></div><div><b>${esc(U.money(earned))}</b><span>earned</span></div></div>
+      ${runs.length ? `<div class="list mini">${runs.map(r => `<div class="row static"><div><span class="${r.status === "ok" ? "" : "errtext"}">${esc(r.summary)}</span></div><time>${U.ago(r.startedAt)}</time></div>`).join("")}</div>` : ""}`;
   }
 
   function sheetSale(itemId) {
@@ -362,6 +377,7 @@
         <label>Gumroad access token (sales sync)<input name="gumroad" type="password" value="${esc(LS.get("eb_gumroad", ""))}" autocomplete="off"></label>
         <p class="hint">Gumroad > Settings > Advanced > Applications > create one and generate a token.</p>`}
         <button class="primary wide">Save settings</button></form>
+      ${window.EB_AUTO.settingsSection()}
       <h4>Your data</h4><p class="muted">${S.mode === "claude" ? "Saved in this artifact's private database, wherever you open it in Claude." : "Saved on this device. Back it up now and then."} ${items().length} items, ${Object.keys(S.earnings).length} sales.</p>
       <div class="btns wrap"><button class="ghost" data-act="backup">${ic("download")}Back up</button><label class="btn ghost">${ic("sync")}Restore<input type="file" id="restore" accept=".json,application/json" hidden></label></div>
       <p class="foot">Earning Bots ${VERSION} · ${S.mode === "claude" ? "running in Claude" : IS_NATIVE ? "Android app" : "browser"}</p>`;
@@ -412,11 +428,11 @@
       case "run": return runBot(botById(el.dataset.bot));
       case "run-all": return runAll();
       case "bot-settings": return openSheet({ type: "bot", id: el.dataset.bot });
-      case "approve": if (it) { await Store.patch("items", id, { status: pipelineKinds.includes(it.kind) ? "new" : "approved", approvedAt: U.now() }); toast("Approved. Find it in your Library."); if (ui.sheet?.type === "item") closeSheet(); } return;
+      case "approve": if (it) { if (ui.sheet?.type === "item") closeSheet(); toast("Approved. Find it in your Library."); await window.EB_AUTO.approve(it); } return;
       case "reject": if (it) { await Store.patch("items", id, { status: "rejected" }); if (ui.sheet?.type === "item") closeSheet(); } return;
       case "approve-all": case "reject-all": {
         const list = items().filter(i => i.status === "pending" && (ui.inboxBot === "all" || i.bot === ui.inboxBot));
-        for (const i of list) await Store.patch("items", i.id, { status: name === "approve-all" ? (pipelineKinds.includes(i.kind) ? "new" : "approved") : "rejected" });
+        for (const i of list) { if (name === "approve-all") await window.EB_AUTO.approve(i, true); else await Store.patch("items", i.id, { status: "rejected" }); }
         return toast(name === "approve-all" ? `${list.length} approved` : `${list.length} rejected`);
       }
       case "kit": {
@@ -449,7 +465,8 @@ Return JSON {"proposal": "..."}`);
         const rows = [["date", "amount", "currency", "platform", "item", "bot", "note"], ...Object.values(S.earnings).sort((a, b) => a.date.localeCompare(b.date)).map(r => [r.date.slice(0, 10), (r.amountCents / 100).toFixed(2), r.currency, r.platform, S.items[r.itemId]?.title || "", S.items[r.itemId]?.bot || r.bot || "", r.note || ""])];
         return Files.save(`earnings-${new Date().toISOString().slice(0, 10)}.csv`, new Blob([rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n")], { type: "text/csv" }));
       }
-      case "sync-gumroad": return syncGumroad();
+      case "sync-gumroad": return window.EB_AUTO.syncSales();
+      default: if ((await window.EB_AUTO.handleAct(name, el)) === true) { renderSheet(); render(); } return;
       case "backup": {
         const data = JSON.stringify({ app: "earning-bots", version: VERSION, exportedAt: U.now(), items: S.items, earnings: S.earnings, watches: S.watches, config: S.config }, null, 1);
         return Files.save(`earning-bots-backup-${new Date().toISOString().slice(0, 10)}.json`, new Blob([data], { type: "application/json" }));
@@ -457,10 +474,10 @@ Return JSON {"proposal": "..."}`);
     }
   }
 
-  async function syncGumroad() {
+  async function syncGumroad(quiet) {
     const token = LS.get("eb_gumroad", "");
-    if (!token) { toast("Add your Gumroad token in Settings first.", "error"); return openSheet({ type: "settings" }); }
-    toast("Syncing Gumroad...");
+    if (!token) { if (quiet) return; toast("Add your Gumroad token in Settings first.", "error"); return openSheet({ type: "settings" }); }
+    if (!quiet) toast("Syncing Gumroad...");
     try {
       const byName = {}; items().forEach(i => { byName[i.data.shortName || i.title] = i; });
       let key = "", added = 0;
@@ -474,8 +491,8 @@ Return JSON {"proposal": "..."}`);
         }
         if (!r.next_page_key) break; key = r.next_page_key;
       }
-      toast(`Gumroad: ${added} new sale${added === 1 ? "" : "s"}`);
-    } catch (e) { toast("Gumroad sync failed: " + e.message, "error"); }
+      if (!quiet || added) toast(`Gumroad: ${added} new sale${added === 1 ? "" : "s"}`);
+    } catch (e) { if (quiet) throw e; toast("Gumroad sync failed: " + e.message, "error"); }
   }
 
   // ---- events ----------------------------------------------------------------------------------
@@ -497,6 +514,7 @@ Return JSON {"proposal": "..."}`);
   document.addEventListener("submit", async e => {
     e.preventDefault();
     const f = e.target, fd = new FormData(f);
+    if (await window.EB_AUTO.handleSubmit(f, fd)) { renderSheet(); return render(); }
     if (f.classList.contains("botform")) {
       const b = botById(f.dataset.bot), vals = {};
       for (const [k, v] of fd.entries()) vals[k] = k === "auto" ? parseFloat(v) || 0 : String(v);

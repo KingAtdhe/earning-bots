@@ -1,4 +1,4 @@
-# Earning Bots 2.0
+# Earning Bots 3.0
 
 Worker bots that make things you can sell or turn into paid work, an approval inbox, a library of
 everything they made, and an earnings dashboard. The same app runs inside Claude and on Android.
@@ -16,6 +16,24 @@ everything they made, and an earnings dashboard. The same app runs inside Claude
 | Client Finder | Local businesses with no website (OpenStreetMap) + personal pitch | Client work | Android app for the map search; Claude optional |
 | Job Scanner | Remote jobs (Remotive, Remote OK) and GitHub bounties + proposals | Freelance work, bounties | Android app; Claude for proposals |
 | Deal Finder | Price drops below your buy price on any product page | Reselling | Android app |
+| Listing Optimizer | Better titles and tags for approved/live products | More Etsy views | Claude |
+| Maze Book Bot | Maze activity books with solutions + KDP listing | Amazon KDP | nothing |
+| Coloring Book Bot | Original mandala coloring books | Amazon KDP | nothing |
+| Notebook Bot | Themed 6x9 lined / dot / graph notebooks | Amazon KDP | nothing |
+| Worksheet Bot | Math worksheet packs with answer keys | Etsy, Teachers Pay Teachers | nothing |
+| Wall Art Bot | Boho / Bauhaus / quote prints in 5 frame ratios + room mockup | Etsy | nothing (Claude optional) |
+| Pinterest Pin Bot | Vertical pins for your approved products | Traffic to your listings | nothing |
+| Ebook Bot | 6-chapter guide as a designed PDF | Gumroad, Etsy | Claude |
+| Newsletter Bot | Weekly newsletter issue | Sponsors, paid subs | Claude |
+| Social Text Bot | Text posts for X, Threads, LinkedIn, Bluesky; auto-schedules in Metricool (inside Claude) | Audience growth | Claude |
+| Gig Writer | Fiverr / Upwork service listings | Freelance work | Claude |
+
+## Automation
+- **Autopilot** (Home): schedules every bot that can run, turns on Claude quality review and sales sync. Runs while the app is open.
+- **Quality gate** per bot: wait in Inbox, Claude reviews and approves items scoring 7/10+, or approve everything.
+- **Etsy auto-publish + sales sync** (Android): connect your Etsy developer app in Settings (callback `https://localhost/etsy-callback.html`).
+- **Gmail drafts** for Client Finder pitches and **Metricool scheduling** for text posts (inside Claude, through your connectors).
+- **Gumroad sales sync** (Android).
 
 In the Android app, Claude bots use your Anthropic API key (Settings). Inside Claude they need no key.
 

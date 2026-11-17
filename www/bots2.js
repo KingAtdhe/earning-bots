@@ -1,0 +1,290 @@
+/* Earning Bots, part 2: more bots and the kinds of things they make. */
+(function () {
+  "use strict";
+  const { U, Store, Claude, Files } = window.EB;
+  const { BOTS, KINDS, PLATFORMS } = window.EB_BOTS;
+  const K = window.EB_KDP, A = window.EB_ART, M = window.EB_MEDIA, D = window.EB_DESIGNS;
+  ["Teachers Pay Teachers", "Pinterest", "X / Threads", "LinkedIn", "Newsletter sponsors", "Paid subscribers"].forEach(p => { if (!PLATFORMS.includes(p)) PLATFORMS.splice(PLATFORMS.length - 1, 0, p); });
+
+  const itemsOf = kind => Object.values(Store.S.items).filter(i => i.kind === kind);
+  const cap = s => s[0].toUpperCase() + s.slice(1);
+  const seeds = n => Array.from({ length: n }, () => Math.floor(Math.random() * 2 ** 31));
+  const leastUsed = (opts, used) => U.shuffle(opts).sort((a, b) => used.filter(x => x === a).length - used.filter(x => x === b).length)[0];
+
+  // ---- kinds ---------------------------------------------------------------------------
+  Object.assign(KINDS, {
+    kdpbook: {
+      label: "KDP book", plural: "KDP books", icon: "book", platforms: ["Amazon KDP", "Etsy"],
+      thumb: (it, w) => K.cover(it, w),
+      async kit(it) {
+        const d = it.data, zip = new window.JSZip(), stem = U.slug(d.title);
+        zip.file(`${stem}-interior.pdf`, K.interior(it));
+        zip.file(`${stem}-front-cover.png`, await Files.canvasBlob(K.cover(it, 2400)));
+        const trim = d.type === "notebook" ? "6 x 9 in" : "8.5 x 11 in";
+        zip.file("LISTING.txt", `KDP (kdp.amazon.com) > Create > Paperback\n\nTITLE\n${d.title}\n\nSUBTITLE\n${d.subtitle}\n\nAUTHOR\n${d.author || "your pen name"}\n\nDESCRIPTION\n${d.description}\n\n7 KEYWORDS\n${d.keywords.join("\n")}\n\nCATEGORIES\n${d.categories.join("\n")}\n\nPRINT OPTIONS\n- Black & white interior, white paper\n- Trim size: ${trim}, no bleed, matte cover\n- Low-content book: ${d.type === "notebook" ? "Yes (no ISBN needed if you choose a free KDP ISBN or none)" : "No"}\n- Cover: KDP Cover Creator, upload the front cover PNG\n\nPRICE\n${d.price.toFixed(2)} USD\n\nALSO ON ETSY\nSell the interior PDF as a digital download with the cover as the first photo.\n`);
+        return { blob: await zip.generateAsync({ type: "blob" }), name: `${stem}-kdp-kit.zip` };
+      },
+      copy: it => [["Title", it.data.title], ["Subtitle", it.data.subtitle], ["Description", it.data.description], ["Keywords", it.data.keywords.join("\n")]],
+      summary: it => it.data.type === "notebook" ? `${it.data.style} · ${it.data.pages} pages` : `${(it.data.seeds || []).length} ${it.data.type === "maze" ? "mazes" : "pages"} · ${it.data.level || ""}`,
+    },
+    worksheet: {
+      label: "Worksheet pack", plural: "Worksheets", icon: "doc", platforms: ["Etsy", "Teachers Pay Teachers", "Gumroad"],
+      thumb: (it, w) => K.cover(it, w),
+      async kit(it) {
+        const d = it.data, zip = new window.JSZip(), stem = U.slug(d.title);
+        zip.file(`${stem}.pdf`, K.interior(it)); zip.file("01-cover.png", await Files.canvasBlob(K.cover(it, 2000)));
+        zip.file("LISTING.txt", `TITLE\n${d.title}\n\nPRICE\n${d.price.toFixed(2)}\n\nTAGS\n${d.tags.join(", ")}\n\nDESCRIPTION\n${d.description}\n`);
+        return { blob: await zip.generateAsync({ type: "blob" }), name: `${stem}.zip` };
+      },
+      copy: it => [["Title", it.data.title], ["Description", it.data.description], ["Tags", it.data.tags.join(", ")]],
+      summary: it => `${it.data.seeds.length} pages + answer keys · ${it.data.grade}`,
+    },
+    wallart: {
+      label: "Wall art", plural: "Wall art", icon: "image", platforms: ["Etsy", "Gumroad"],
+      thumb: (it, w) => A.roomMockup(it, w),
+      async kit(it) {
+        const d = it.data, zip = new window.JSZip(), stem = U.slug(d.title).slice(0, 50);
+        const files = zip.folder("1-digital-files"), photos = zip.folder("2-listing-photos");
+        for (const [key, , , sizes] of A.SIZES) files.file(`${stem}-${key}.jpg`, await Files.canvasBlob(A.artCanvas(it, key, 4500), "image/jpeg", 0.93));
+        photos.file("01-mockup.jpg", await Files.canvasBlob(A.roomMockup(it, 2000), "image/jpeg", 0.9));
+        photos.file("02-print.jpg", await Files.canvasBlob(A.artCanvas(it, "2x3", 2000), "image/jpeg", 0.9));
+        zip.file("LISTING.txt", `TITLE\n${d.title}\n\nPRICE\n${d.price.toFixed(2)}\n\nTAGS\n${d.tags.join(", ")}\n\nDESCRIPTION\n${d.description}\n\nFILES INCLUDED (upload all 5 as digital files)\n${A.SIZES.map(s => `- ${s[0]} ratio: prints at ${s[3]}`).join("\n")}\n`);
+        return { blob: await zip.generateAsync({ type: "blob" }), name: `${stem}-wall-art-kit.zip` };
+      },
+      copy: it => [["Title", it.data.title], ["Description", it.data.description], ["Tags", it.data.tags.join(", ")]],
+      summary: it => `${it.data.style} · ${A.ART_PALETTES[it.data.palette % A.ART_PALETTES.length].name}`,
+    },
+    pin: {
+      label: "Pinterest pin", plural: "Pins", icon: "pin", platforms: ["Pinterest"],
+      thumb: (it, w) => pinFor(it, w),
+      async kit(it) {
+        const zip = new window.JSZip();
+        zip.file(`pin-${U.slug(it.data.headline).slice(0, 40)}.png`, await Files.canvasBlob(pinFor(it, 1000)));
+        zip.file("PIN.txt", `TITLE\n${it.data.pinTitle}\n\nDESCRIPTION\n${it.data.pinDescription}\n\nLINK\n${it.data.link || "paste your listing link"}\n`);
+        return { blob: await zip.generateAsync({ type: "blob" }), name: `pin-${U.slug(it.data.headline).slice(0, 40)}.zip` };
+      },
+      copy: it => [["Pin title", it.data.pinTitle], ["Pin description", it.data.pinDescription]],
+      summary: it => `promotes: ${(Store.S.items[it.data.sourceId] || {}).title || "an item"}`.slice(0, 80),
+    },
+    ebook: {
+      label: "Ebook", plural: "Ebooks", icon: "book", platforms: ["Gumroad", "Etsy", "Amazon KDP"],
+      thumb: (it, w) => A.ebookCover(it, w),
+      async kit(it) {
+        const d = it.data, zip = new window.JSZip(), stem = U.slug(d.title);
+        zip.file(`${stem}.pdf`, A.ebookPdf(it)); zip.file("cover.png", await Files.canvasBlob(A.ebookCover(it, 1600)));
+        zip.file("LISTING.txt", `TITLE\n${d.title}\n\nSUBTITLE\n${d.subtitle}\n\nPRICE\n${d.price.toFixed(2)}\n\nTAGS\n${(d.tags || []).join(", ")}\n\nDESCRIPTION\n${d.description}\n`);
+        return { blob: await zip.generateAsync({ type: "blob" }), name: `${stem}-ebook.zip` };
+      },
+      copy: it => [["Title", it.data.title], ["Description", it.data.description]],
+      summary: it => `${it.data.chapters.length} chapters · ${Math.round(it.data.chapters.reduce((a, c) => a + String(c.body).split(/\s+/).length, 0) / 100) * 100} words`,
+    },
+    gig: {
+      label: "Gig listing", plural: "Gigs", icon: "briefcase", platforms: ["Upwork / Fiverr", "Client work"],
+      thumb: null, kit: null,
+      copy: it => [["Gig title", it.data.title], ["Description", it.data.description], ["Packages", it.data.packages.map(p => `${p.name} – ${p.price}: ${p.includes}`).join("\n")], ["FAQ", (it.data.faq || []).map(f => `Q: ${f.q}\nA: ${f.a}`).join("\n\n")], ["Tags", (it.data.tags || []).join(", ")]],
+      summary: it => `${it.data.platform} · from ${it.data.packages[0]?.price || ""}`,
+    },
+    post: {
+      label: "Text post", plural: "Text posts", icon: "chat", platforms: ["X / Threads", "LinkedIn", "Affiliate"],
+      thumb: null, kit: null,
+      copy: it => [["Post", it.data.text]],
+      summary: it => it.data.scheduledFor ? `scheduled ${new Date(it.data.scheduledFor).toLocaleString()}` : (it.data.networks || []).join(", "),
+    },
+  });
+  const article = KINDS.article; const baseSummary = article.summary;
+  article.summary = it => it.data.format === "newsletter" ? `Newsletter · ${Math.round((it.data.markdown || "").split(/\s+/).length / 10) * 10} words` : baseSummary(it);
+
+  function pinFor(it, w) {
+    const src = Store.S.items[it.data.sourceId], k = src && KINDS[src.kind];
+    let canvas = null; try { if (k && k.thumb) canvas = k.thumb(src, 900); } catch { /* source gone */ }
+    return A.pinCanvas(it, canvas, w);
+  }
+
+  // ---- listing copy -----------------------------------------------------------------------
+  const KDP_COMMON = { author: "" };
+  function mazeCopy(level, n) {
+    const who = level === "easy" ? "Kids Ages 6-9" : level === "medium" ? "Kids Ages 8-12" : "Adults";
+    return { title: `Mazes for ${who}: ${n} ${cap(level)} Maze Puzzles`, subtitle: `Fun Activity Book with Solutions. One Maze per Page, 8.5 x 11 Large Format`,
+      kicker: "ACTIVITY BOOK", coverMain: "MAZES", coverSub: `${n} ${cap(level)} Puzzles for ${who}`, footer: "SOLUTIONS INCLUDED  ·  ONE MAZE PER PAGE",
+      keywords: [`maze book for ${who.toLowerCase().replace(/ ages.*/, "")}`, `${level} mazes`, "maze puzzle book", "activity book", "brain games", "puzzles with solutions", "screen free activities"],
+      categories: ["Children's Books > Activities, Crafts & Games > Mazes", "Humor & Entertainment > Puzzles & Games > Mazes"],
+      description: `${n} ${level} mazes to keep minds busy and screens off.\n\n- One big maze per page, printed on large 8.5 x 11 inch pages\n- ${level === "hard" ? "Challenging designs for teens and adults" : "Just the right challenge to build focus and problem solving"}\n- Full solutions at the back\n\nA great gift for road trips, rainy days and quiet time.`, price: 6.99 };
+  }
+  function coloringCopy(n) {
+    return { title: `Mandala Coloring Book for Adults: ${n} Relaxing Designs`, subtitle: "Stress Relieving Patterns for Mindfulness and Relaxation. Single-Sided Pages, 8.5 x 11",
+      kicker: "ADULT COLORING BOOK", coverMain: "MANDALAS", coverSub: `${n} Relaxing Designs`, footer: "SINGLE-SIDED PAGES  ·  LARGE 8.5 x 11 FORMAT",
+      keywords: ["mandala coloring book", "adult coloring book", "stress relief coloring", "relaxation gifts", "mindfulness coloring", "coloring books for women", "pattern coloring book"],
+      categories: ["Crafts, Hobbies & Home > Coloring Books for Grown-Ups > Mandalas & Patterns", "Self-Help > Stress Management"],
+      description: `Unwind with ${n} original mandala designs, from simple to detailed.\n\n- Every design on its own page with a blank back, so markers won't bleed through\n- Large 8.5 x 11 inch pages\n- Works with colored pencils, gel pens and fine markers\n\nA thoughtful gift for anyone who needs a calm moment.`, price: 7.99 };
+  }
+  const NOTEBOOK_THEMES = [["Nurse", "Nurses"], ["Teacher", "Teachers"], ["Gratitude", "Gratitude"], ["Gym", "Fitness"], ["Recipe", "Cooks"], ["Dream", "Dreamers"], ["Travel", "Travelers"], ["Prayer", "Faith"], ["Plant Lover", "Gardeners"], ["Cat Mom", "Cat Lovers"], ["Dog Dad", "Dog Lovers"], ["Coffee", "Coffee Lovers"], ["Boss Lady", "Entrepreneurs"], ["Bullet", "Planners"], ["Poetry", "Writers"]];
+  function notebookCopy(theme, style, pages) {
+    const st = { lined: "Lined", dot: "Dot Grid", graph: "Graph Paper", journal: "Dated Journal" }[style];
+    return { title: `${theme} Notebook: ${st} Journal, ${pages} Pages, 6 x 9`, subtitle: `${st} Notebook for ${theme === "Bullet" ? "Bullet Journaling" : theme + " Fans"}. Cute Gift Journal`, coverTitle: `${theme.toUpperCase()}\nNOTEBOOK`,
+      keywords: [`${theme.toLowerCase()} notebook`, `${theme.toLowerCase()} gifts`, `${st.toLowerCase()} journal`, `${st.toLowerCase()} notebook 6x9`, "journal for women", "gift notebook", "notebook for writing"],
+      categories: ["Self-Help > Journal Writing", "Crafts, Hobbies & Home > Crafts & Hobbies > Paper Crafts"],
+      description: `A simple, sturdy ${st.toLowerCase()} notebook for ${theme.toLowerCase()} lovers.\n\n- ${pages} ${st.toLowerCase()} pages\n- Handy 6 x 9 inch size, fits in any bag\n- Soft matte cover\n\nPerfect as a gift for birthdays, holidays and thank-yous.`, price: 6.49 };
+  }
+  const WS = { add: ["Addition", ["1st Grade", "2nd Grade", "3rd Grade", "4th Grade"]], sub: ["Subtraction", ["1st Grade", "2nd Grade", "3rd Grade", "4th Grade"]], mul: ["Multiplication", ["2nd Grade", "3rd Grade", "4th Grade", "5th Grade"]], div: ["Division", ["3rd Grade", "3rd Grade", "4th Grade", "5th Grade"]] };
+
+  // ---- bots ----------------------------------------------------------------------------------
+  const add = (bot) => { const i = BOTS.findIndex(b => b.id === bot.after); BOTS.splice(i >= 0 ? i + 1 : BOTS.length, 0, bot); };
+
+  add({ id: "maze_books", after: "puzzle_books", title: "Maze Book Bot", icon: "maze", category: "Make & sell", earnsVia: "Amazon KDP, Etsy",
+    desc: "Generates maze activity books (easy, medium or hard) with solutions, cover and KDP listing.", needs: [],
+    settings: [{ key: "count", label: "Mazes per book", type: "select", def: "60", options: [["40", "40"], ["60", "60"], ["100", "100"]] }, { key: "author", label: "Author / pen name", type: "text", def: "" }],
+    async run(ctx) {
+      const level = leastUsed(["easy", "medium", "hard"], itemsOf("kdpbook").filter(i => i.data.type === "maze").map(i => i.data.level));
+      const n = parseInt(ctx.cfg.count, 10) || 60, size = { easy: [12, 15], medium: [18, 23], hard: [26, 33] }[level];
+      const data = { type: "maze", level, w: size[0], h: size[1], seeds: seeds(n), palette: itemsOf("kdpbook").length, author: ctx.cfg.author, ...mazeCopy(level, n) };
+      await ctx.add("kdpbook", data.title, data, { price: data.price }); return `“${data.title}” is ready to review.`;
+    } });
+  add({ id: "coloring_books", after: "maze_books", title: "Coloring Book Bot", icon: "palette", category: "Make & sell", earnsVia: "Amazon KDP, Etsy",
+    desc: "Draws original mandala coloring pages and packages them as an adult coloring book for KDP.", needs: [],
+    settings: [{ key: "count", label: "Designs per book", type: "select", def: "40", options: [["30", "30"], ["40", "40"], ["50", "50"]] }, { key: "author", label: "Author / pen name", type: "text", def: "" }],
+    async run(ctx) {
+      const n = parseInt(ctx.cfg.count, 10) || 40;
+      const data = { type: "coloring", seeds: seeds(n), palette: itemsOf("kdpbook").length + 2, author: ctx.cfg.author, ...coloringCopy(n) };
+      data.title = itemsOf("kdpbook").some(i => i.data.title === data.title) ? `${data.title} (Volume ${itemsOf("kdpbook").filter(i => i.data.type === "coloring").length + 1})` : data.title;
+      await ctx.add("kdpbook", data.title, data, { price: data.price }); return `“${data.title}” is ready to review.`;
+    } });
+  add({ id: "notebooks", after: "coloring_books", title: "Notebook Bot", icon: "notebook", category: "Make & sell", earnsVia: "Amazon KDP",
+    desc: "Makes themed 6 x 9 notebooks and journals (lined, dot grid, graph) with covers aimed at gift niches.", needs: [],
+    settings: [{ key: "perRun", label: "Notebooks per run", type: "number", def: 3, min: 1, max: 10 }, { key: "author", label: "Author / pen name", type: "text", def: "" }],
+    async run(ctx) {
+      const have = new Set(itemsOf("kdpbook").filter(i => i.data.type === "notebook").map(i => i.data.theme + i.data.style)); let made = 0;
+      for (const [theme] of U.shuffle(NOTEBOOK_THEMES)) {
+        if (made >= ctx.cfg.perRun) break;
+        const style = U.pick(["lined", "dot", "graph", "journal"]); if (have.has(theme + style)) continue;
+        const data = { type: "notebook", theme, style, pages: 120, seed: Math.floor(Math.random() * 1e9), pattern: Math.floor(Math.random() * 3), palette: Math.floor(Math.random() * 9), author: ctx.cfg.author, ...notebookCopy(theme, style, 120) };
+        await ctx.add("kdpbook", data.title, data, { price: data.price }); made++;
+      }
+      return `${made} notebooks ready to review.`;
+    } });
+  add({ id: "worksheets", after: "notebooks", title: "Worksheet Bot", icon: "pencil", category: "Make & sell", earnsVia: "Etsy, Teachers Pay Teachers",
+    desc: "Creates math practice worksheet packs (by grade) with answer keys for teachers and parents.", needs: [],
+    settings: [{ key: "pages", label: "Pages per pack", type: "select", def: "10", options: [["5", "5"], ["10", "10"], ["20", "20"]] }],
+    async run(ctx) {
+      const used = itemsOf("worksheet").map(i => i.data.op + i.data.level);
+      const combos = []; Object.keys(WS).forEach(op => [0, 1, 2, 3].forEach(l => combos.push([op, l])));
+      const [op, level] = U.shuffle(combos).sort((a, b) => used.filter(u => u === a[0] + a[1]).length - used.filter(u => u === b[0] + b[1]).length)[0];
+      const [opName, grades] = WS[op], grade = grades[level], n = parseInt(ctx.cfg.pages, 10) || 10;
+      const data = { type: "worksheet", op, opName, level, grade, seeds: seeds(n), palette: Math.floor(Math.random() * 9),
+        title: `${grade} ${opName} Worksheets: ${n} Pages with Answer Keys`, kicker: grade.toUpperCase() + " MATH", coverMain: opName.toUpperCase(), coverSub: `${n} Practice Pages + Answer Keys`, footer: "PRINTABLE PDF  ·  INSTANT DOWNLOAD",
+        tags: [`${opName.toLowerCase()} worksheets`, `${grade.toLowerCase()} math`, "math worksheets", "printable worksheets", "homeschool math", "math practice", "answer key", "teacher resources", "math printable", "kids worksheets", "classroom", "math drills", "homeschool"].map(t => t.slice(0, 20)),
+        description: `${n} printable ${opName.toLowerCase()} practice pages for ${grade.toLowerCase()} students, each with 30 problems and a matching answer key.\n\n- Perfect for homeschool, classroom warm-ups and homework\n- Name, date and score line on every page\n- US Letter PDF, prints great on A4 too\n\nInstant download: print as many copies as you need for your own class or family.`, price: 3.5 };
+      await ctx.add("worksheet", data.title, data, { price: data.price }); return `“${data.title}” is ready to review.`;
+    } });
+  add({ id: "wall_art", after: "pod_designs", title: "Wall Art Bot", icon: "image", category: "Make & sell", earnsVia: "Etsy printable wall art",
+    desc: "Generates printable wall art (boho arches, suns, Bauhaus, abstract shapes, quote prints) in 5 frame sizes with a room mockup.", needs: [], uses: ["claude"],
+    settings: [{ key: "perRun", label: "Prints per run", type: "number", def: 3, min: 1, max: 8 }],
+    async run(ctx) {
+      let quotes = [];
+      if (Claude.available()) {
+        try { quotes = await Claude.json(`Write 8 short, original, uplifting quotes for printable wall art (4 to 10 words each, no famous quotes, no names). Return a JSON array of strings.`); } catch { quotes = []; }
+      }
+      if (!Array.isArray(quotes) || !quotes.length) quotes = ["You are exactly where you need to be", "Slow mornings and big dreams", "Grow through what you go through", "Home is wherever we are together", "Make today a little brighter", "Breathe in courage, breathe out doubt"];
+      const made = [];
+      for (let i = 0; i < ctx.cfg.perRun; i++) {
+        const style = U.pick(A.STYLES), palette = Math.floor(Math.random() * A.ART_PALETTES.length), pal = A.ART_PALETTES[palette].name;
+        const quote = style === "quote" ? String(U.pick(quotes)).slice(0, 90) : "";
+        const name = style === "quote" ? `"${quote}" Quote Print` : `${{ arches: "Boho Rainbow Arches", sun: "Boho Sun", bauhaus: "Bauhaus Geometric", blobs: "Abstract Organic Shapes" }[style]} Print`;
+        const data = { style, palette, seed: Math.floor(Math.random() * 1e9), quote, caption: style === "quote" ? "" : U.pick(["", "", "stay wild", "golden hour", "here comes the sun", "slow living"]),
+          title: `${name}, ${pal} Printable Wall Art, Mid Century Boho Decor, Digital Download`.slice(0, 140),
+          tags: ["printable wall art", "boho wall art", "digital download", `${style === "quote" ? "quote print" : style + " print"}`, "living room decor", "bedroom wall art", "mid century modern", `${pal.toLowerCase()} decor`, "abstract art print", "minimalist print", "gallery wall", "neutral wall art", "large wall art"].map(t => t.slice(0, 20)),
+          description: `Refresh your walls in minutes. This ${style === "quote" ? "quote" : "abstract"} print comes in a ${pal.toLowerCase()} palette that works with modern and boho rooms.\n\nYOU GET 5 HIGH-RESOLUTION JPG FILES\n${A.SIZES.map(s => `- ${s[0]} ratio: ${s[3]}`).join("\n")}\n\nPrint at home, at a local print shop or with an online service. This is a digital download; no physical item will be shipped.`, price: 4.9 };
+        await ctx.add("wallart", data.title, data, { price: data.price }); made.push(name);
+      }
+      return `${made.length} wall art prints ready to review.`;
+    } });
+  add({ id: "pin_bot", after: "content_bot", title: "Pinterest Pin Bot", icon: "pin", category: "Content", earnsVia: "Free traffic to your Etsy and KDP listings",
+    desc: "Makes eye-catching vertical pins (with title and description) for your approved and live products, so Pinterest sends buyers to them.", needs: [],
+    settings: [{ key: "perRun", label: "Pins per run", type: "number", def: 5, min: 1, max: 15 }],
+    async run(ctx) {
+      const pinned = new Set(itemsOf("pin").map(p => p.data.sourceId));
+      const visual = ["printable", "puzzlebook", "design", "kdpbook", "worksheet", "wallart", "ebook"];
+      const src = Object.values(Store.S.items).filter(i => visual.includes(i.kind) && ["approved", "listed"].includes(i.status) && !pinned.has(i.id))
+        .sort((a, b) => (b.status === "listed") - (a.status === "listed")).slice(0, ctx.cfg.perRun);
+      if (!src.length) return "No approved products without a pin. Approve some products first.";
+      for (const s of src) {
+        const name = (s.data.shortName || s.data.title || s.title).replace(/\s*\(.*?\)\s*$/, "").split(",")[0];
+        const kicker = { printable: "Printable planner", puzzlebook: "Puzzle book", design: "Gift idea", kdpbook: "Activity book", worksheet: "Free your evenings", wallart: "Wall art", ebook: "Ebook" }[s.kind];
+        const link = Object.values(s.links || {})[0] || "";
+        await ctx.add("pin", name, { sourceId: s.id, headline: name.slice(0, 70), kicker, cta: s.status === "listed" ? "SHOP NOW" : "GET IT", palette: Math.floor(Math.random() * 3), link,
+          pinTitle: `${name}`.slice(0, 100), pinDescription: `${(s.data.description || "").split("\n")[0].slice(0, 300)} ${(s.data.tags || []).slice(0, 5).map(t => "#" + t.replace(/\s+/g, "")).join(" ")}`.trim() });
+      }
+      return `${src.length} pins ready to review.`;
+    } });
+  add({ id: "ebook_bot", after: "article_bot", title: "Ebook Bot", icon: "book", category: "Content", earnsVia: "Gumroad, Etsy, KDP ebooks",
+    desc: "Writes a practical short guide (6 chapters) in a niche you pick and lays it out as a designed PDF with cover.", needs: ["claude"],
+    settings: [{ key: "niche", label: "Topics to write about", type: "text", def: "budgeting for young families, meal prep on a budget, decluttering", placeholder: "comma separated" }],
+    async run(ctx) {
+      const done = itemsOf("ebook").map(i => i.data.title);
+      const r = await Claude.json(`Write a practical, accurate short ebook (about 3500-4500 words) that people would pay 5-9 USD for. Pick a specific, useful angle within one of these topics: ${ctx.cfg.niche}. Not one of: ${done.join("; ") || "none"}. No fake statistics, testimonials or quotes; no medical, legal or financial guarantees.
+Return JSON {"title": max 50 chars, "subtitle": max 80 chars, "kicker": 2-4 word label, "description": sales description 600-900 characters with a short bullet list of what's inside, "tags": 13 lowercase tags max 20 chars, "price": number 4-12, "chapters": [{"title": "...", "body": markdown text using ## subheadings, short paragraphs and - lists}] (6 chapters)}`);
+      if (!r || !r.title || !Array.isArray(r.chapters) || r.chapters.length < 3) throw new Error("The ebook came back incomplete. Run again.");
+      const data = { title: U.clampStr(r.title, 80), subtitle: U.clampStr(r.subtitle, 120), kicker: U.clampStr(r.kicker, 40), description: U.clampStr(r.description, 2000), tags: (r.tags || []).map(t => U.clampStr(String(t), 20)).slice(0, 13), price: Math.min(19, Math.max(3, Number(r.price) || 7)),
+        chapters: r.chapters.slice(0, 8).map(c => ({ title: U.clampStr(c.title, 100), body: U.clampStr(c.body, 12000) })), palette: Math.floor(Math.random() * 6), seed: Math.floor(Math.random() * 1e9) };
+      await ctx.add("ebook", data.title, data, { price: data.price }); return `Ebook “${data.title}” is ready to review.`;
+    } });
+  add({ id: "newsletter_bot", after: "ebook_bot", title: "Newsletter Bot", icon: "mail", category: "Content", earnsVia: "Newsletter sponsors, paid subscriptions, affiliate links",
+    desc: "Writes a weekly newsletter issue for your niche, ready to paste into beehiiv, Substack or Kit.", needs: ["claude"],
+    settings: [{ key: "topic", label: "Newsletter topic", type: "text", def: "smart money habits for people in their 20s" }, { key: "name", label: "Newsletter name", type: "text", def: "" }],
+    async run(ctx) {
+      const prev = itemsOf("article").filter(i => i.data.format === "newsletter").map(i => i.data.title).slice(-10);
+      const r = await Claude.json(`Write this week's issue of a newsletter${ctx.cfg.name ? ` called "${ctx.cfg.name}"` : ""} about "${ctx.cfg.topic}". 600-900 words: a hook intro, 3 short sections with practical takeaways, one "tool or resource of the week" (describe the type of tool, link placeholder https://example.com/affiliate-link), and a one-line sign-off. Accurate, no invented statistics or quotes. Avoid repeating: ${prev.join("; ") || "none"}.
+Return JSON {"title": subject line max 60 chars, "meta": preview text max 120 chars, "keyword": the issue's main topic, "markdown": the issue body in Markdown}`);
+      if (!r || !r.markdown) throw new Error("No issue came back.");
+      await ctx.add("article", U.clampStr(r.title, 90), { format: "newsletter", title: U.clampStr(r.title, 90), meta: U.clampStr(r.meta, 200), keyword: U.clampStr(r.keyword, 90), markdown: U.clampStr(r.markdown, 30000), topic: ctx.cfg.topic });
+      return `Issue “${r.title}” is ready to review.`;
+    } });
+  add({ id: "social_poster", after: "newsletter_bot", title: "Social Text Bot", icon: "chat", category: "Content", earnsVia: "Audience growth for affiliate links and your products",
+    desc: "Writes text posts for X, Threads, LinkedIn and Bluesky. Inside Claude it can schedule approved posts automatically through Metricool.", needs: ["claude"],
+    settings: [{ key: "topic", label: "What you post about", type: "text", def: "building small online income streams" },
+      { key: "networks", label: "Networks", type: "select", def: "twitter,threads", options: [["twitter,threads", "X + Threads"], ["linkedin", "LinkedIn"], ["bluesky", "Bluesky"], ["twitter,threads,bluesky", "X + Threads + Bluesky"], ["facebook", "Facebook"]] },
+      { key: "perRun", label: "Posts per run", type: "number", def: 5, min: 1, max: 14 },
+      { key: "autoSchedule", label: "Schedule approved posts in Metricool", type: "select", def: "off", options: [["off", "No, I post them myself"], ["on", "Yes, 2 posts a day at good times"]] }],
+    async run(ctx) {
+      const prev = itemsOf("post").map(i => i.data.text.slice(0, 60)).slice(-30);
+      const limit = ctx.cfg.networks.includes("bluesky") ? 290 : ctx.cfg.networks.includes("linkedin") ? 1200 : 270;
+      const r = await Claude.json(`Write ${ctx.cfg.perRun} standalone social posts about "${ctx.cfg.topic}" for ${ctx.cfg.networks}. Each under ${limit} characters, useful or thought-provoking, no hashtag spam (max 1 hashtag), no emojis overload, no fake numbers or claims. Vary formats: tip, mini-story, contrarian take, question, checklist. Don't repeat: ${prev.join(" | ") || "none"}.
+Return a JSON array of strings.`);
+      if (!Array.isArray(r)) throw new Error("No posts came back.");
+      let made = 0;
+      for (const t of r.slice(0, ctx.cfg.perRun)) { const text = String(t).slice(0, limit); if (!text.trim()) continue; await ctx.add("post", text.slice(0, 80), { text, networks: ctx.cfg.networks.split(",") }); made++; }
+      return `${made} posts ready to review.`;
+    } });
+  add({ id: "gig_bot", after: "job_scanner", title: "Gig Writer", icon: "briefcase", category: "Clients & jobs", earnsVia: "Fiverr and Upwork services",
+    desc: "Writes complete Fiverr/Upwork service listings for your skills: title, description, 3 packages, FAQ and tags.", needs: ["claude"],
+    settings: [{ key: "skills", label: "Your skills", type: "text", def: "Shopify store setup, SEO product descriptions, website translation" }, { key: "platform", label: "Platform", type: "select", def: "Fiverr", options: [["Fiverr", "Fiverr"], ["Upwork", "Upwork project catalog"]] }],
+    async run(ctx) {
+      const prev = itemsOf("gig").map(i => i.data.title);
+      const r = await Claude.json(`Create 2 ${ctx.cfg.platform} service listings that sell well, based on these skills: ${ctx.cfg.skills}. Pick specific, in-demand angles; not these: ${prev.join("; ") || "none"}. Honest: no invented reviews, client names or results.
+Return a JSON array of {"title": "${ctx.cfg.platform === "Fiverr" ? "I will ..." : "You will get ..."}" max 80 chars, "description": 900-1200 characters, "packages": [{"name": "Basic|Standard|Premium", "price": "e.g. 40 USD", "delivery": "e.g. 3 days", "includes": "short list"}] (3), "faq": [{"q": "...", "a": "..."}] (4), "tags": 5 tags, "requirements": what you need from the buyer}`);
+      if (!Array.isArray(r)) throw new Error("No gigs came back.");
+      let made = 0;
+      for (const g of r.slice(0, 2)) { if (!g.title || !Array.isArray(g.packages)) continue; await ctx.add("gig", U.clampStr(g.title, 100), { ...g, title: U.clampStr(g.title, 100), platform: ctx.cfg.platform }, { status: "pending" }); made++; }
+      return `${made} gig listings ready to review.`;
+    } });
+  add({ id: "seo_optimizer", after: "idea_bot", title: "Listing Optimizer", icon: "chart", category: "Make & sell", earnsVia: "More views and sales on what you already listed",
+    desc: "Rewrites titles and tags of your approved and live products to match what buyers search for. Keeps a copy of the old version.", needs: ["claude"],
+    settings: [{ key: "perRun", label: "Products per run", type: "number", def: 5, min: 1, max: 10 }],
+    async run(ctx) {
+      const cands = Object.values(Store.S.items).filter(i => ["printable", "design", "wallart", "worksheet"].includes(i.kind) && ["approved", "listed"].includes(i.status) && !i.data.optimizedAt).slice(0, ctx.cfg.perRun);
+      if (!cands.length) return "Every approved product is already optimized.";
+      const r = await Claude.json(`You are an Etsy SEO expert. For each product, write a better title (max 140 characters, most important search phrase first, natural not spammy) and 13 tags (lowercase, max 20 characters each, multi-word long-tail phrases buyers type, no repeats of single words across tags).
+Products: ${JSON.stringify(cands.map(c => ({ id: c.id, title: c.data.title, tags: c.data.tags, kind: c.kind })))}
+Return a JSON array of {"id": "...", "title": "...", "tags": ["..."]} in the same order.`);
+      if (!Array.isArray(r)) throw new Error("No suggestions came back.");
+      let n = 0;
+      for (const s of r) {
+        const it = Store.S.items[s.id]; if (!it || !s.title) continue;
+        const tags = (s.tags || []).map(t => String(t).toLowerCase().slice(0, 20)).filter(Boolean).slice(0, 13);
+        await Store.patch("items", it.id, { data: { ...it.data, previous: { title: it.data.title, tags: it.data.tags }, title: String(s.title).slice(0, 140), tags: tags.length ? tags : it.data.tags, optimizedAt: U.now() } });
+        n++;
+      }
+      return `${n} listings optimized. Update them on Etsy with the Copy buttons${window.EB.IS_NATIVE ? " or the Etsy sync" : ""}.`;
+    } });
+
+  window.EB_BOTS.helpers = { itemsOf };
+})();
