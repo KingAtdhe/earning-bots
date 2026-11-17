@@ -5,9 +5,13 @@
   const { BOTS, KINDS, PLATFORMS } = window.EB_BOTS;
   const M = window.EB_MEDIA;
   const S = Store.S, esc = U.esc;
-  const VERSION = "4.1";
+  const VERSION = "4.2";
 
   const ICONS = {
+    tablet: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M17 5v14"/><path d="M19 8h2M19 11h2M19 14h2"/>',
+    grid: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 10h16M4 15h16M10 4v16M15 4v16"/>',
+    party: '<path d="M4 20l5-14 9 9z"/><path d="M14 4l1 2M19 7l2-1M17 3l-1 2"/><circle cx="20" cy="11" r="1"/>',
+    cards: '<rect x="3" y="6" width="11" height="15" rx="2" transform="rotate(-8 8 13)"/><rect x="10" y="3" width="11" height="15" rx="2"/>',
     home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
     bot: '<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1"/><circle cx="9" cy="14" r="1.2"/><circle cx="15" cy="14" r="1.2"/>',
     inbox: '<path d="M4 13l2-8h12l2 8"/><path d="M4 13v6h16v-6h-5l-1 2h-4l-1-2z"/>',
@@ -354,7 +358,7 @@
     }
     if (it.kind === "opportunity") { acts.push(`<button class="primary" data-act="open" data-url="${esc(d.url)}">${ic("link")}Open</button>`); acts.push(`<button class="ghost" data-act="proposal" data-id="${esc(it.id)}">${ic("spark")}${ui.running["prop:" + it.id] ? "Writing..." : d.proposal ? "Rewrite proposal" : "Draft proposal"}</button>`); }
     if (it.kind === "niche" && it.status !== "using") acts.push(`<button class="primary" data-act="use-niche" data-id="${esc(it.id)}">${ic("bolt")}Use this niche</button>`);
-    if (["printable", "wallart", "design", "kdpbook", "worksheet"].includes(it.kind) && it.status !== "pending") acts.push(`<button class="ghost" data-act="variations" data-id="${esc(it.id)}">${ic("spark")}Make 3 variations</button>`);
+    if (["printable", "wallart", "design", "kdpbook", "worksheet", "dplanner", "paperpack"].includes(it.kind) && it.status !== "pending") acts.push(`<button class="ghost" data-act="variations" data-id="${esc(it.id)}">${ic("spark")}Make 3 variations</button>`);
     if (it.kind === "deal") acts.push(`<button class="primary" data-act="open" data-url="${esc(d.url)}">${ic("link")}Open offer</button>`);
     const pipeline = k.pipeline ? `<div class="seg">${k.pipeline.map(s => `<button class="${it.status === s ? "on" : ""}" data-act="status" data-id="${esc(it.id)}" data-status="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join("")}</div>` : "";
     const links = !k.pipeline && it.status !== "pending" ? `<form class="links" data-id="${esc(it.id)}"><h4>Where is it listed?</h4>${(k.platforms || ["Other"]).map(p => `<label>${esc(p)} link<input name="${esc(p)}" value="${esc((it.links || {})[p] || "")}" placeholder="https://..."></label>`).join("")}<button class="ghost">Save links</button></form>` : "";

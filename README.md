@@ -1,4 +1,4 @@
-# Earning Bots 4.1
+# Earning Bots 4.2
 
 Worker bots that make things you can sell or turn into paid work, an approval inbox, a library of
 everything they made, and an earnings dashboard. The same app runs inside Claude and on Android.
@@ -81,6 +81,21 @@ Append an object to `BOTS` in `www/bots.js`: `id`, `title`, `desc`, `icon`, `cat
 `needs`, `settings` and `async run(ctx)`. Use `ctx.add(kind, title, data)` to send work to the Inbox.
 New output types go in `KINDS` (thumbnail, kit, copy buttons).
 
+## New in 4.2
+- **Digital Planner Bot**: hyperlinked landscape planners for tablets (side tabs on every page, year > month > week
+  links, goals, habit tracker, to-do, notes). Dated for the coming year or undated, 6 themes including a dark one.
+- **Digital Paper Bot**: packs of 12 seamless patterns (16 pattern styles, 14 palettes with seasonal timing),
+  3600 x 3600 px at 300 dpi, delivered as 2 ZIPs under Etsy's 20 MB limit with a commercial-use license.
+- **Party Games Bot**: 23-page bundles (bingo with 30 unique cards and a caller list, word scramble, word search,
+  would you rather, find the guest, answer keys) for 6 occasions timed to the season; Claude can add any occasion.
+- **Card Deck Bot**: print-and-cut decks (affirmations, kids affirmations, couples and family conversation cards,
+  journal prompts, Dolch sight-word flashcards) with card backs and crop marks; Claude can write any topic.
+- **KDP**: every book kit now includes a print-ready full cover PDF (back + spine + front with bleed), sized from the
+  interior's real page count with KDP's spine formula, spine text from 79 pages, barcode area left clear.
+- **Shirts**: 3 new styles (vintage worn print, varsity arch, sunset badge) and 4 new ink palettes.
+- **Pins**: 3 layouts, using the product's lifestyle photo instead of a flat cover.
+- Quality check now tells identical designs (rejected) apart from similar titles (warning to reword).
+
 ## Quality check, market data and listing photos (4.1)
 - **Quality check** on everything the bots make, before it reaches your Inbox: tidies titles and tags, catches
   near-duplicates of earlier listings, looks at the main image (empty or washed-out designs) and, if Claude is
@@ -121,7 +136,7 @@ The app becomes a dashboard: it syncs both ways, you approve and tap Publish on 
 - **Listing validator**: blocks uploads with trademarked terms, over-long titles, invalid tags, short descriptions or missing prices.
 - **Performance**: long books render with pauses so the screen never freezes; photos and files are drawn one at a time and freed; wall-art resolution adapts to the phone's memory; long lists load 40 at a time.
 - **Activity log** (Settings): every run, publish and error, exportable for debugging on a real phone.
-- **Tests**: `npm test` runs 70 app checks and `tests/cloud.mjs` 19 cloud checks (auth, two-way sync, newest-change-wins, scheduled runs, big items, deletes) against the worker on Cloudflare's runtime. App checks cover (puzzle/maze/calendar correctness, Etsy listing limits, storage, every bot inside Claude, and the full Android publishing flow against fake Etsy/Printify/Pinterest APIs, including failure and resume). CI runs them before every APK build; a failing test blocks the build.
+- **Tests**: `npm test` runs 91 app checks and `tests/cloud.mjs` 23 cloud checks (auth, two-way sync, newest-change-wins, scheduled runs, big items, deletes) against the worker on Cloudflare's runtime. App checks cover (puzzle/maze/calendar correctness, Etsy listing limits, storage, every bot inside Claude, and the full Android publishing flow against fake Etsy/Printify/Pinterest APIs, including failure and resume). CI runs them before every APK build; a failing test blocks the build.
 
 ## Develop
 ```

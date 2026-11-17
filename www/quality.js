@@ -12,8 +12,8 @@
   const { KINDS } = window.EB_BOTS;
   const W = window.EB_WIN;
   const S = Store.S;
-  const SELL = ["printable", "wallart", "worksheet", "design", "kdpbook", "puzzlebook", "ebook"];
-  const VISUAL = ["printable", "wallart", "worksheet", "design", "kdpbook", "puzzlebook", "ebook"];
+  const SELL = ["printable", "wallart", "worksheet", "design", "kdpbook", "puzzlebook", "ebook", "dplanner", "paperpack", "partygame", "carddeck"];
+  const VISUAL = SELL;
   const canDraw = () => typeof document !== "undefined" && !window.EB.IN_CLOUD && typeof document.createElement === "function";
   const settings = () => { try { return Store.config().auto || {}; } catch { return {}; } };
 
@@ -39,12 +39,18 @@
   // ---- 3. duplicates ---------------------------------------------------------------------------------
   const tokens = s => new Set(W.words(s));
   function similarity(a, b) { const A = tokens(a), B = tokens(b); if (!A.size || !B.size) return 0; let n = 0; A.forEach(w => { if (B.has(w)) n++; }); return n / (A.size + B.size - n); }
+  // the design recipe: two items with the same recipe are the same product, whatever their titles say
+  function recipe(it) {
+    const d = it.data || {}, pick = { printable: [d.bundleKey, d.theme, d.bundle && d.bundle.name], wallart: [d.style, d.palette, d.quote], design: [String(d.lines || d.slogan), d.style, d.palette], kdpbook: [d.type, d.theme, d.style, d.level, d.palette], worksheet: [d.op, d.level], dplanner: [d.year, d.theme], paperpack: [d.palette], partygame: [d.occasion], carddeck: [d.deck], puzzlebook: [d.title], ebook: [d.title] }[it.kind];
+    return pick ? it.kind + "|" + JSON.stringify(pick) : null;
+  }
   function duplicateOf(it) {
-    const title = it.data.title || it.title;
+    const title = it.data.title || it.title, sig = recipe(it);
     for (const o of Object.values(S.items)) {
       if (o.id === it.id || o.kind !== it.kind || o.status === "rejected" || o.createdAt > it.createdAt) continue;
       const ra = it.data.variantOf || it.id, rb = o.data.variantOf || o.id; if (ra === rb) continue; // its own variations
-      if (similarity(title, o.data.title || o.title) >= 0.8) return o;
+      if (sig && sig === recipe(o)) return { o, same: true };
+      if (similarity(title, o.data.title || o.title) >= 0.8) return { o, same: false };
     }
     return null;
   }
@@ -109,8 +115,9 @@ Return {"score": 1-10, "issues": [up to 3 short problems a seller should fix, em
       if (m.price) { price = m.price; if ("price" in d) d.price = m.price; fixed.push(`price ${Number(m.market.priceFrom).toFixed(2)} → ${m.price.toFixed(2)} (most sellers charge ${m.market.p25}–${m.market.p75})`); }
     }
     const dup = duplicateOf({ ...it, data: d });
-    if (dup) issues.push(["hard", `almost the same as “${U.clampStr(dup.data.title || dup.title, 60)}”, made earlier`]);
-    if (Array.isArray(d.tags) && ["printable", "wallart", "worksheet", "design"].includes(it.kind) && d.tags.length < 13) issues.push(["soft", `uses ${d.tags.length} of Etsy's 13 tags`]);
+    if (dup && dup.same) issues.push(["hard", `the same design as “${U.clampStr(dup.o.data.title || dup.o.title, 60)}”, made earlier`]);
+    else if (dup) issues.push(["soft", `the title is almost the same as “${U.clampStr(dup.o.data.title || dup.o.title, 60)}”; change a few words so they don't compete in search`]);
+    if (Array.isArray(d.tags) && ["printable", "wallart", "worksheet", "design", "dplanner", "paperpack", "partygame", "carddeck"].includes(it.kind) && d.tags.length < 13) issues.push(["soft", `uses ${d.tags.length} of Etsy's 13 tags`]);
     if (String(d.title || "").split(/\s+/).length > 20) issues.push(["soft", "the title is long; Etsy favours short, clear titles"]);
     const v = window.EB_AUTO && window.EB_AUTO.validate ? window.EB_AUTO.validate({ ...it, data: d, price }) : [];
     v.forEach(x => issues.push(["hard", x]));

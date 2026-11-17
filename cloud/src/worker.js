@@ -7,6 +7,7 @@ import "../../www/bots.js";
 import "../../www/kdp.js";
 import "../../www/art.js";
 import "../../www/bots2.js";
+import "../../www/bots3.js";
 import "../../www/research.js";
 import "../../www/quality.js";
 
@@ -15,7 +16,7 @@ const COLS = ["items", "earnings", "runs", "watches", "config"];
 const { BOTS } = globalThis.EB_BOTS;
 // bots that only make data or call APIs (no drawing). Sudoku books need more CPU than a request allows.
 const CLOUD_BOTS = new Set(["niche_research", "product_factory", "calendar_bot", "idea_bot", "seo_optimizer", "maze_books", "coloring_books", "notebooks", "worksheets",
-  "pod_designs", "wall_art", "content_bot", "pin_bot", "article_bot", "ebook_bot", "newsletter_bot", "social_poster", "lead_finder", "job_scanner", "gig_bot", "price_watch"]);
+  "pod_designs", "wall_art", "content_bot", "pin_bot", "article_bot", "ebook_bot", "newsletter_bot", "social_poster", "lead_finder", "job_scanner", "gig_bot", "price_watch", "planner_bot", "paper_bot", "party_bot", "cards_bot"]);
 const BIG = ["puzzles", "chapters", "markdown"];
 
 // ---- helpers ---------------------------------------------------------------------------------------

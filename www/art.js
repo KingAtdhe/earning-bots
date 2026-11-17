@@ -84,9 +84,32 @@
   }
 
   // Pinterest pin promoting one of your items
+  // three layouts: 0 headline above the image, 1 full-bleed photo with a headline band, 2 framed photo on a light card
+  function wrapLines(x, text, maxW, max = 3) { const words = String(text).split(" "), lines = []; let line = ""; for (const w of words) { const t = line ? line + " " + w : w; if (x.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t; } if (line) lines.push(line); return lines.slice(0, max); }
+  function coverDraw(x, src, dx, dy, dw, dh) { const k = Math.max(dw / src.width, dh / src.height), sw = dw / k, sh = dh / k; x.drawImage(src, (src.width - sw) / 2, (src.height - sh) / 2, sw, sh, dx, dy, dw, dh); }
   function pinCanvas(item, sourceCanvas, width = 1000) {
     const d = item.data, H = Math.round(width * 1.5), cv = document.createElement("canvas"); cv.width = width; cv.height = H;
     const x = cv.getContext("2d"), u = width / 100, pal = [["#1f3d33", "#f4ead5", "#e9b949"], ["#f4ead5", "#1f3d33", "#c86b4a"], ["#2b2d42", "#fefae0", "#ef8354"]][(d.palette || 0) % 3];
+    if (d.layout === 1 && sourceCanvas) {
+      coverDraw(x, sourceCanvas, 0, 0, width, H * 0.7);
+      x.fillStyle = pal[0]; x.fillRect(0, H * 0.68, width, H * 0.32);
+      x.fillStyle = pal[2]; x.fillRect(width * 0.08, H * 0.68 - u * 3, width * 0.4, u * 6); x.fillStyle = pal[0]; x.font = `700 ${u * 3.2}px Inter, Arial, sans-serif`; x.textAlign = "center"; x.fillText(String(d.kicker || "PRINTABLE").toUpperCase(), width * 0.28, H * 0.68 + u * 1.1);
+      x.fillStyle = pal[1]; let fs = u * 7.6; x.font = `800 ${fs}px Fraunces, Georgia, serif`; x.textAlign = "left";
+      wrapLines(x, d.headline, width * 0.84).forEach((l, i) => x.fillText(l, width * 0.08, H * 0.68 + u * 13 + i * fs * 1.1));
+      x.fillStyle = pal[2]; x.font = `700 ${u * 3.4}px Inter, Arial, sans-serif`; x.fillText(`${d.cta || "SHOP NOW"}  →`, width * 0.08, H - u * 6);
+      return cv;
+    }
+    if (d.layout === 2 && sourceCanvas) {
+      x.fillStyle = pal[1] === "#1f3d33" ? "#f4ead5" : "#f7f3ec"; x.fillRect(0, 0, width, H);
+      x.fillStyle = pal[0]; x.textAlign = "center"; let fs = u * 8; x.font = `800 ${fs}px Fraunces, Georgia, serif`;
+      const lines = wrapLines(x, d.headline, width * 0.86); lines.forEach((l, i) => x.fillText(l, width / 2, u * 15 + i * fs * 1.08));
+      const top = u * 15 + lines.length * fs * 1.08 + u * 2, ih = H - top - u * 22;
+      x.save(); x.shadowColor = "rgba(0,0,0,.22)"; x.shadowBlur = u * 3; x.shadowOffsetY = u; x.fillStyle = "#fff"; x.fillRect(width * 0.07, top, width * 0.86, ih); x.restore();
+      coverDraw(x, sourceCanvas, width * 0.07 + u, top + u, width * 0.86 - 2 * u, ih - 2 * u);
+      x.fillStyle = pal[2]; x.font = `700 ${u * 3.6}px Inter, Arial, sans-serif`; x.fillText(String(d.kicker || "PRINTABLE").toUpperCase(), width / 2, H - u * 12);
+      x.fillStyle = pal[0]; x.font = `700 ${u * 3.2}px Inter, Arial, sans-serif`; x.fillText(d.cta || "SHOP NOW", width / 2, H - u * 6);
+      return cv;
+    }
     x.fillStyle = pal[0]; x.fillRect(0, 0, width, H);
     if (sourceCanvas) { const iw = width * 0.88, ih = iw * sourceCanvas.height / sourceCanvas.width, ix = (width - iw) / 2, iy = H * 0.33; x.fillStyle = "rgba(0,0,0,.2)"; x.fillRect(ix + u, iy + u, iw, Math.min(ih, H * 0.6)); x.drawImage(sourceCanvas, 0, 0, sourceCanvas.width, Math.min(sourceCanvas.height, sourceCanvas.width * (H * 0.6) / iw), ix, iy, iw, Math.min(ih, H * 0.6)); }
     x.fillStyle = pal[2]; x.font = `700 ${u * 4}px Inter, Arial, sans-serif`; x.textAlign = "center"; x.fillText(String(d.kicker || "PRINTABLE").toUpperCase(), width / 2, u * 10);

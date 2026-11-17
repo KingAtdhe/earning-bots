@@ -10,6 +10,7 @@
   const hash = s => { let h = 2166136261; for (const ch of String(s)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
   const css = c => Array.isArray(c) ? `rgb(${c.join(",")})` : c;
   const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  const hexRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
   const free = c => { try { c.width = 0; c.height = 0; } catch { /* ignore */ } };
 
   // ---- surfaces --------------------------------------------------------------------------------
@@ -180,6 +181,34 @@
     return cv;
   }
 
+  // landscape tablet (for digital planners)
+  function tabletLandscape(page, seed, opts = {}) {
+    const cv = make(W0, H0), x = cv.getContext("2d"), u = W0 / 100, r = rng(seed + 21);
+    SURFACES[(opts.surface ?? Math.floor(r() * SURFACES.length)) % SURFACES.length](x, W0, H0, r);
+    const tw = W0 * 0.78, th = tw * 0.75 + u * 4.4, tx = (W0 - tw) / 2 - u * 3, ty = (H0 - th) / 2 - u * 1.5;
+    shadowed(x, u * 3, u * 1.2, 0.4, () => { x.fillStyle = "#1c1d20"; x.beginPath(); x.roundRect(tx, ty, tw, th, u * 3); x.fill(); });
+    const b = u * 2.2, sw = tw - 2 * b, sh = th - 2 * b; x.fillStyle = "#fff"; x.fillRect(tx + b, ty + b, sw, sh);
+    const k = Math.min(sw / page.width, sh / page.height), dw = page.width * k, dh = page.height * k; x.drawImage(page, tx + b + (sw - dw) / 2, ty + b + (sh - dh) / 2, dw, dh);
+    const glare = x.createLinearGradient(tx, ty, tx + tw, ty + th); glare.addColorStop(0, "rgba(255,255,255,.10)"); glare.addColorStop(0.35, "rgba(255,255,255,0)"); x.fillStyle = glare; x.fillRect(tx + b, ty + b, sw, sh);
+    x.save(); x.translate(tx + tw + u * 3.5, H0 * 0.5); x.rotate(0.05);
+    shadowed(x, u, u * 0.5, 0.3, () => { x.fillStyle = "#f4f4f2"; x.beginPath(); x.roundRect(-u * 0.75, -H0 * 0.3, u * 1.5, H0 * 0.56, u * 0.75); x.fill(); });
+    x.restore();
+    light(x, W0, H0, 0.16); noise(x, W0, H0, 0.04);
+    if (opts.badge) badge(x, opts.badge, W0 / 2, H0 - u * 3.6, u);
+    return cv;
+  }
+  // a few cards or swatches scattered on a surface
+  function fanScene(items, seed, opts = {}) {
+    const cv = make(W0, H0), x = cv.getContext("2d"), u = W0 / 100, r = rng(seed + 33);
+    SURFACES[(opts.surface ?? Math.floor(r() * SURFACES.length)) % SURFACES.length](x, W0, H0, r);
+    const n = items.length;
+    items.forEach((c, i) => { const w = opts.w || W0 * 0.24, cx = W0 * (0.5 + (i - (n - 1) / 2) * (opts.spread || 0.17)), cy = H0 * (0.5 + (i % 2 ? 0.05 : -0.03)); placePaper(x, c, cx, cy, w, (i - (n - 1) / 2) * 0.09 + (r() - 0.5) * 0.05, u); });
+    sprig(x, W0 * 0.08, H0 * 0.98, H0 * 0.4, 0.4, u, r);
+    light(x, W0, H0); noise(x, W0, H0, 0.05);
+    if (opts.badge) badge(x, opts.badge, W0 / 2, H0 - u * 4.5, u);
+    return cv;
+  }
+
   // a framed print on a wall: three room styles
   const ROOMS = {
     living: { wall: ["#efe9df", "#e3dacb"], floor: "#cdbfa9", frame: "#2b2622" },
@@ -326,6 +355,50 @@
         ["Instant digital download", "No physical item will be shipped"], [`${n * 2} pages`, `${n} practice pages and ${n} answer keys`],
         ["30 problems per page", "With name, date and score lines"], ["US Letter PDF", "Prints fine on A4 too (fit to page)"], ["Print for your class or family", "Personal and classroom use"]] })]);
       if (n > 1) out.push(["tablet", () => { const pg = K.worksheetPage(it, 1); const c = tabletScene(pg, seed); free(pg); return c; }]);
+    }
+    const B3 = window.EB_BOTS3;
+    if (B3 && it.kind === "dplanner") {
+      const { out: pages, plan } = B3.plannerBuilders(d), pg = (i, w = 1400) => B3.renderPage(pages[i](), w);
+      const fit = c => { const o = onBackdrop(c, [236, 233, 228]); free(c); return o; };
+      out.push(["tablet:cover", () => { const c = pg(0); const o = tabletLandscape(c, seed, { badge: "Hyperlinked: tap a tab or a day to jump there" }); free(c); return o; }]);
+      out.push(["tablet:month", () => { const c = pg(plan.month(new Date().getMonth()) - 1); const o = tabletLandscape(c, seed + 1); free(c); return o; }]);
+      out.push(["included", () => { const t = [[0, "Cover"], [1, "Year at a glance"], [2, "Goals"], [plan.month(0) - 1, "12 monthly pages"], [plan.week(0) - 1, `${plan.weeks.length} weekly pages`], [plan.habit - 1, "Habit tracker"], [plan.todo - 1, "To-do list"], [plan.notes - 1, "8 notes pages"]].map(([i, l]) => [pg(i, 520), l]); const c = includedGrid(t, { heading: "What's inside", sub: `${plan.total} hyperlinked pages · landscape PDF for tablets`, accent: (B3.PL_THEMES[d.theme] || {}).accent }); t.forEach(([c2]) => free(c2)); return c; }]);
+      out.push(["tablet:week", () => { const c = pg(plan.week(Math.min(plan.weeks.length - 1, 10)) - 1); const o = tabletLandscape(c, seed + 2); free(c); return o; }]);
+      out.push(["details", () => detailsCard({ accent: (B3.PL_THEMES[d.theme] || {}).accent, heading: `${d.year || "Undated"} digital planner`, features: [
+        ["Hyperlinked tabs on every page", "Year, January to December, Notes"], ["Tap a day to open its week", d.year ? "Every week of " + d.year : "52 undated weeks"],
+        ["For iPad and Android tablets", "Any PDF app that supports links"], [`${plan.total} pages`, "Goals, habits, to-do, lined and dot notes"], ["Instant digital download", "No physical item will be shipped"]],
+        steps: [["Buy", "Checkout on Etsy"], ["Download", "Save the PDF to your tablet"], ["Open", "In your note-taking app and write"]] })]);
+      out.push(["page:year", () => fit(pg(1, 1600))]);
+    } else if (B3 && it.kind === "paperpack") {
+      const pal = B3.PAPER_PALETTES[d.palette % B3.PAPER_PALETTES.length], acc = hexRgb(pal.c[1]);
+      out.push(["preview", () => B3.paperPreview(d, 2000)]);
+      out.push(["fan", () => { const cs = [0, 3, 6, 9].map(i => B3.paperCanvas(d, i, 700)); const c = fanScene(cs, seed, { w: W0 * 0.3, spread: 0.18, badge: "Seamless: repeats with no visible edges" }); cs.forEach(free); return c; }]);
+      out.push(["closeup", () => { const p = B3.paperCanvas(d, 1, 2000); const c = make(W0, H0); c.getContext("2d").drawImage(p, 0, (2000 - 1500) / 2, 2000, 1500, 0, 0, W0, H0); free(p); return c; }]);
+      out.push(["included", () => { const t = d.papers.map((pp, i) => [B3.paperCanvas(d, i, 400), pp.style[0].toUpperCase() + pp.style.slice(1)]); const c = includedGrid(t, { heading: "12 patterns included", sub: "3600 x 3600 px JPG · 12 x 12 in at 300 dpi", bg: hexRgb(pal.c[0]), accent: acc }); t.forEach(([c2]) => free(c2)); return c; }]);
+      out.push(["details", () => detailsCard({ accent: acc, bg: hexRgb(pal.c[0]), heading: `${pal.name} digital paper`, features: [
+        ["12 seamless patterns", "Tile them for any size"], ["3600 x 3600 px JPG", "12 x 12 in at 300 dpi"], ["Commercial use allowed", "On products you make and sell"],
+        ["Not for resale as patterns", "Files can't be shared or resold as-is"], ["Instant digital download", "2 ZIP files, no physical item"]],
+        steps: [["Buy", "Checkout on Etsy"], ["Download", "Unzip the 2 folders"], ["Create", "Print, craft or design"]] })]);
+    } else if (B3 && it.kind === "partygame") {
+      const pages = B3.partyBuilders(d), pg = (i, w = 1100) => B3.renderPage(pages[i](), w), acc = d.accent;
+      out.push(["cover", () => { const c = pg(0, 1400); const o = onBackdrop(c, mix(d.light, [230, 225, 218], 0.5)); free(c); return o; }]);
+      out.push(["desk:bingo", () => { const c = pg(2); const o = deskScene(c, seed, { badge: "30 different bingo cards + caller list" }); free(c); return o; }]);
+      out.push(["included", () => { const t = [[2, "Bingo (30 cards)"], [17, "Word scramble"], [19, "Word search"], [21, "Would you rather"], [22, "Find the guest"], [20, "Answer keys"]].map(([i, l]) => [pg(i, 520), l]); const c = includedGrid(t, { heading: "5 games included", sub: `${pages.length}-page PDF · US Letter and A4`, accent: acc, bg: mix(d.light, [255, 255, 255], 0.4) }); t.forEach(([c2]) => free(c2)); return c; }]);
+      out.push(["clipboard:scramble", () => { const c = pg(17); const o = clipboardScene(c, seed, { badge: "Answer keys included" }); free(c); return o; }]);
+      out.push(["details", () => detailsCard({ accent: acc, bg: mix(d.light, [255, 255, 255], 0.5), heading: `${d.occasion} games`, features: [
+        ["5 printable games", "Bingo, scramble, word search and more"], ["30 unique bingo cards", "2 per page, with a caller list"], ["Answer keys included", "For the scramble and the word search"],
+        ["US Letter and A4", "Print at actual size"], ["Instant digital download", "No physical item will be shipped"]] })]);
+      out.push(["desk:find", () => { const c = pg(22); const o = deskScene(c, seed + 3); free(c); return o; }]);
+    } else if (B3 && it.kind === "carddeck") {
+      const cards = n => Array.from({ length: n }, (_, i) => B3.cardCanvas(d, Math.floor(i * d.cards.length / n), 700));
+      const pages = B3.deckBuilders(d);
+      out.push(["cover", () => B3.deckCover(d, 2000)]);
+      out.push(["fan", () => { const cs = [...cards(4), B3.cardCanvas(d, 0, 700, true)]; const c = fanScene(cs, seed, { w: W0 * 0.16, spread: 0.18, badge: "Playing-card size: 2.5 x 3.5 in" }); cs.forEach(free); return c; }]);
+      out.push(["desk:sheet", () => { const c = B3.renderPage(pages[1](), 1100); const o = deskScene(c, seed, { badge: "9 cards per page, with crop marks" }); free(c); return o; }]);
+      out.push(["included", () => { const t = cards(6).map((c, i) => [c, `Card ${Math.floor(i * d.cards.length / 6) + 1}`]); t.push([B3.cardCanvas(d, 0, 400, true), "Card back"]); const c = includedGrid(t, { heading: `${d.cards.length} cards + card backs`, sub: "Print, cut and use", accent: d.accent, bg: mix(d.light, [255, 255, 255], 0.4) }); t.forEach(([c2]) => free(c2)); return c; }]);
+      out.push(["details", () => detailsCard({ accent: d.accent, bg: mix(d.light, [255, 255, 255], 0.5), heading: d.name, features: [
+        [`${d.cards.length} printable cards`, d.short], ["2.5 x 3.5 in cards", "9 per page, with crop marks"], ["Card back page included", "Print on the reverse or glue"],
+        ["US Letter and A4", "Print at actual size on card stock"], ["Instant digital download", "No physical item will be shipped"]] })]);
     }
     return out;
   }

@@ -11,8 +11,13 @@
     { name: "Navy on light", ink: "#1d3557", accent: "#e63946", shirt: "#f1ede4" },
     { name: "Black on light", ink: "#111111", accent: "#c1121f", shirt: "#e9e5dc" },
     { name: "Forest on sand", ink: "#283618", accent: "#bc6c25", shirt: "#e9dcc4" },
+    { name: "Retro orange", ink: "#f2e8cf", accent: "#f28c38", shirt: "#3a2e39" },
+    { name: "Dusty rose", ink: "#5c3d46", accent: "#d98c8c", shirt: "#f4e4de" },
+    { name: "Varsity", ink: "#fefae0", accent: "#bc4749", shirt: "#283d3b" },
+    { name: "Ocean", ink: "#e0f2f1", accent: "#4db6ac", shirt: "#1c3144" },
   ];
-  const STYLES = ["stacked", "badge", "retro", "script"];
+  const STYLES = ["stacked", "badge", "retro", "script", "vintage", "varsity", "sunset"];
+  const seedOf = s => { let h = 7; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h || 1; };
 
   function fitFont(x, text, family, weight, maxW, start) {
     let fs = start;
@@ -74,6 +79,28 @@
           x.fillStyle = pal.ink; x.fillText(l, cx, y + fs * 0.75); y += fs * 0.95;
         }
       });
+    } else if (d.style === "varsity") { // arched college lettering
+      const r = width * 0.62, cy = H * 0.62;
+      x.font = `400 ${u * 13}px "Archivo Black", Impact, sans-serif`; x.fillStyle = pal.accent;
+      arcText(x, lines[0], cx, cy, r, -Math.PI / 2, false);
+      let y = cy - r + u * 26;
+      lines.slice(1).forEach((l, i) => { const fs = fitFont(x, l, '"Bebas Neue", Impact, sans-serif', 400, width * 0.8, u * (i ? 10 : 20)); x.fillStyle = pal.ink; x.fillText(l, cx, y + fs * 0.8); y += fs * 0.95; });
+      x.fillStyle = pal.accent; x.font = `400 ${u * 5}px "Bebas Neue", Impact, sans-serif`; x.fillText("★   ★   ★", cx, y + u * 6);
+    } else if (d.style === "sunset") { // striped sunset circle with the words underneath
+      const cy = H * 0.3, r = width * 0.28;
+      x.save(); x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.clip();
+      for (let i = 0; i < 9; i++) { x.fillStyle = i % 2 ? pal.accent : pal.ink; const y0 = cy - r + i * (2 * r / 9); x.fillRect(cx - r, y0, 2 * r, (2 * r / 9) * (i < 4 ? 1 : 0.55 + (8 - i) * 0.08)); }
+      x.restore();
+      let y = cy + r + u * 14;
+      lines.forEach((l, i) => { const fs = fitFont(x, l, '"Archivo Black", Impact, sans-serif', 400, width * 0.9, u * (i === 0 ? 12 : 9)); x.fillStyle = i % 2 ? pal.accent : pal.ink; x.fillText(l, cx, y); y += fs * 1.1; });
+    } else if (d.style === "vintage") { // stacked type with a worn, screen-printed texture
+      const sizes = lines.map((l, i) => fitFont(x, l, '"Archivo Black", Impact, sans-serif', 400, width * 0.9, u * (i === 0 ? 15 : 12)));
+      let y = H * 0.3; x.lineWidth = u * 0.8;
+      lines.forEach((l, i) => { x.font = `400 ${sizes[i]}px "Archivo Black", Impact, sans-serif`; x.fillStyle = i === 1 ? pal.accent : pal.ink; x.fillText(l, cx, y + sizes[i] * 0.8); y += sizes[i] * 1.05; });
+      x.fillStyle = pal.ink; x.fillRect(width * 0.2, y + u * 2, width * 0.6, u * 0.8);
+      const r = window.EB_KDP.rng(seedOf(lines.join(""))); x.globalCompositeOperation = "destination-out";
+      for (let i = 0; i < 2600; i++) { x.globalAlpha = 0.3 + r() * 0.7; x.beginPath(); x.arc(r() * width, r() * H, u * (0.05 + r() * 0.35), 0, 7); x.fill(); }
+      x.globalAlpha = 1; x.globalCompositeOperation = "source-over";
     } else { // stacked
       const sizes = lines.map((l, i) => fitFont(x, l, '"Bebas Neue", Impact, sans-serif', 400, width * 0.94, u * (i === lines.length - 1 ? 26 : 16)));
       const total = sizes.reduce((a, b) => a + b * 0.86, 0);

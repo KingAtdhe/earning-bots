@@ -168,7 +168,7 @@ console.log("Quality check, market data and listing photos");
   check("tags are cleaned: shortened, deduped, trademarks dropped", JSON.stringify(r.tags) === JSON.stringify(["weekly planner", "printable weekly"]), JSON.stringify(r.tags));
   check("market data adds relevant top-seller tags, skips unrelated and trademarked ones", r.market.tags.includes("teacher gift") && r.market.tags.includes("lesson planner") && !r.market.tags.includes("dog mom") && !r.market.tags.some(t => /hogwarts/.test(t)), JSON.stringify(r.market.tags));
   check("an out-of-range price moves into the market range", r.market.price === 3.99 && r.market.dataPrice === 3.99, JSON.stringify(r.market));
-  check("near-duplicates are moved out of the Inbox with the reason", r.dup[0] === "rejected" && /almost the same/.test(r.dup[1]), JSON.stringify(r.dup));
+  check("copies of the same design are moved out of the Inbox with the reason", r.dup[0] === "rejected" && /same design/.test(r.dup[1]), JSON.stringify(r.dup));
   check("variations of an item are not treated as duplicates", r.vars.length === 2 && r.vars.every(s => s === "pending"), JSON.stringify(r.vars));
   check("an empty design is caught and kept out of the publish queue", r.blank[0] === "rejected" && /empty/.test(r.blank[1]) && r.blankNotQueued, JSON.stringify(r.blank));
   check("printables get 6+ listing photos", r.photos.printable.n >= 6 && r.photos.printable.all, JSON.stringify(r.photos.printable));
@@ -179,10 +179,57 @@ console.log("Quality check, market data and listing photos");
   await ctx.close();
 }
 
+console.log("New bots: digital planner, digital paper, party games, card decks; KDP covers; pins");
+{
+  const { pg, ctx } = await page("local");
+  const runs = {};
+  for (const id of ["planner_bot", "paper_bot", "party_bot", "cards_bot", "coloring_books", "notebooks", "wall_art"]) { const r = await runBot(pg, id); runs[id] = r && r.status; }
+  check("the 4 new bots run without Claude", ["planner_bot", "paper_bot", "party_bot", "cards_bot"].every(id => runs[id] === "ok"), JSON.stringify(runs));
+  const r = await pg.evaluate(async () => {
+    const S = window.EB.Store.S, B3 = window.EB_BOTS3, out = {}, get = k => Object.values(S.items).find(i => i.kind === k);
+    const kinds = ["dplanner", "paperpack", "partygame", "carddeck"];
+    out.items = kinds.map(k => { const it = get(k); return it && { k, status: it.status, qa: it.qa && it.qa.score, issues: it.qa && it.qa.issues.map(x => x[1]), tags: it.data.tags.length, valid: window.EB_AUTO.validate(it) }; });
+    const pl = get("dplanner"), plan = B3.plannerPlan(pl.data), pblob = await B3.plannerPdf(pl), ptxt = await pblob.text();
+    out.planner = { pages: await B3.pdfPageCount(pblob), total: plan.total, weeks: plan.weeks.length, links: (ptxt.match(/\/Subtype \/Link/g) || []).length };
+    const pa = get("partygame"); out.party = await B3.pdfPageCount(await B3.partyPdf(pa));
+    const dk = get("carddeck"); out.deck = [await B3.pdfPageCount(await B3.deckPdf(dk)), 2 + Math.ceil(dk.data.cards.length / 9)];
+    const pp = get("paperpack"), files = B3.etsyFiles(pp), z = await files[0][1](), zz = await window.JSZip.loadAsync(z);
+    out.paper = { files: files.length, mb: z.size / 1048576, inZip: Object.keys(zz.files).length, license: !!zz.files["LICENSE.txt"] };
+    out.photos = {}; out.assets = {};
+    for (const k of kinds) {
+      const it = get(k), set = window.EB_SCENES.photoSet(it), dims = set.map(([, f]) => { const c = f(); const d = [c.width, c.height]; c.width = 0; return d; });
+      out.photos[k] = { n: set.length, ok: dims.every(([w, h]) => w === 2000 && h === 1500) };
+      const a = window.EB_AUTO.assets(it); out.assets[k] = [a.images.length, a.files.length];
+    }
+    // KDP: print-ready full cover sized from the real page count
+    const nbk = Object.values(S.items).find(i => i.kind === "kdpbook" && i.data.type === "notebook"), cbk = Object.values(S.items).find(i => i.kind === "kdpbook" && i.data.type === "coloring");
+    const fc = await B3.kdpCoverFiles(nbk, await window.EB_KDP.interior(nbk)), fc2 = await B3.kdpCoverFiles(cbk, await window.EB_KDP.interior(cbk));
+    const box = async b => { const t = await b.text(), m = /\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/.exec(t); return [Math.round(m[1] / 72 * 1000) / 1000, Math.round(m[2] / 72 * 1000) / 1000]; };
+    out.kdp = { nb: [fc.pages, ...(await box(fc.blob))], col: [fc2.pages, ...(await box(fc2.blob))] };
+    // pins: three layouts, lifestyle photo inside
+    const wa = get("wallart"); out.pins = [0, 1, 2].map(l => { const pin = { kind: "pin", data: { sourceId: wa.id, headline: "Test", kicker: "Wall art", cta: "SHOP NOW", palette: l, layout: l } }; const c = window.EB_BOTS.KINDS.pin.thumb(pin, 500); return [c.width, c.height]; });
+    out.shirtStyles = window.EB_MEDIA.STYLES.length;
+    return out;
+  });
+  check("new products pass the quality check and listing rules", r.items.every(i => i && i.status === "pending" && i.qa >= 80 && i.tags === 13 && !i.valid.length), JSON.stringify(r.items));
+  check("digital planner: every page built, 52-53 weeks, hyperlinked", r.planner.pages === r.planner.total && r.planner.weeks >= 52 && r.planner.links > r.planner.pages * 14, JSON.stringify(r.planner));
+  check("party games PDF has all 23 pages", r.party === 23, String(r.party));
+  check("card deck PDF: instructions, card pages and backs", r.deck[0] === r.deck[1], JSON.stringify(r.deck));
+  check("digital paper: 2 ZIPs of 6 patterns + license, under Etsy's 20 MB", r.paper.files === 2 && r.paper.inZip === 7 && r.paper.license && r.paper.mb < 20, JSON.stringify(r.paper));
+  check("every new product gets 5+ listing photos in 4:3", Object.values(r.photos).every(p => p.n >= 5 && p.ok), JSON.stringify(r.photos));
+  check("every new product is ready for Etsy upload (photos + files)", Object.values(r.assets).every(([i, f]) => i >= 5 && f >= 1), JSON.stringify(r.assets));
+  const near = (a, b) => Math.abs(a - b) < 0.002;
+  check("KDP full cover matches KDP's size formula (trim x2 + spine + bleed)", near(r.kdp.nb[1], 12 + r.kdp.nb[0] * 0.002252 + 0.25) && near(r.kdp.nb[2], 9.25) && near(r.kdp.col[1], 17 + r.kdp.col[0] * 0.002252 + 0.25) && near(r.kdp.col[2], 11.25), JSON.stringify(r.kdp));
+  check("pins come in 3 layouts at 2:3", r.pins.every(([w, h]) => w === 500 && h === 750), JSON.stringify(r.pins));
+  check("7 shirt design styles", r.shirtStyles === 7);
+  check("no page errors", pg.errors.length === 0, pg.errors.join(" | "));
+  await ctx.close();
+}
+
 console.log("Android (publishing to Etsy, Printify, Pinterest)");
 {
   const { pg, ctx } = await page("android");
-  for (const id of ["niche_research", "calendar_bot", "pod_designs", "wall_art", "worksheets"]) { const run = await runBot(pg, id); check(`bot ${id} runs`, run && run.status === "ok", run ? run.summary : ""); }
+  for (const id of ["niche_research", "calendar_bot", "pod_designs", "wall_art", "worksheets", "cards_bot"]) { const run = await runBot(pg, id); check(`bot ${id} runs`, run && run.status === "ok", run ? run.summary : ""); }
   const niche = await pg.evaluate(() => Object.values(window.EB.Store.S.items).find(i => i.kind === "niche" && i.data.etsy).data.etsy);
   check("research reads the live market: price range, top tags, newcomers", niche.p25 > 0 && niche.p75 > niche.p25 && niche.tags.some(t => t[0] === "weekly planner") && niche.freshWin > 0 && niche.digitalShare === 80, JSON.stringify(niche).slice(0, 300));
   await pg.click("#nav [data-tab=inbox]"); await pg.evaluate(() => document.querySelector("[data-act=approve-all]").click()); await pg.waitForTimeout(800);

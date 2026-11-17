@@ -73,6 +73,7 @@ r = await api("GET", "/sync?since=0", null, token);
 check("deletes sync to the cloud", r.data.docs.find(d => d.id === "local-1").data === null);
 const st = (await api("GET", "/status", null, token)).data;
 check("status reports the last check and runs", st.lastTick > 0 && st.lastRuns.length > 0);
+for (const id of ["planner_bot", "paper_bot", "party_bot", "cards_bot"]) { const rr = await api("POST", `/run/${id}`, null, token); check(`new bot ${id} runs in the cloud`, rr.status === 200 && rr.data.done[0].status === "ok" && rr.data.done[0].made === 1, JSON.stringify(rr.data).slice(0, 200)); }
 check("bots that need Claude explain why when it's missing", (await api("POST", "/run/idea_bot", null, token)).data.error.includes("Anthropic"));
 check("no page errors", errors.length === 0, errors.join(" | "));
 await browser.close(); server.close();

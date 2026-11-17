@@ -61,6 +61,12 @@
         else nd.title = `${d.title.replace(/ \(Volume \d+\)$/, "")} (Volume ${i + 2})`;
         await save(`kdpbook-${U.uid()}`, nd.title, nd);
       }
+    } else if (it.kind === "dplanner") {
+      const B3 = window.EB_BOTS3, have = new Set(Object.values(S.items).filter(i => i.kind === "dplanner" && i.data.year === d.year).map(i => i.data.theme));
+      for (const theme of Object.keys(B3.PL_THEMES).filter(t => !have.has(t)).slice(0, count)) { const nd = { year: d.year, theme }; const c = { ...nd, title: d.title.replace(d.theme, theme), tags: d.tags.map(t => t.replace(d.theme.toLowerCase(), theme.toLowerCase())), description: d.description.replace(new RegExp(d.theme.toLowerCase(), "g"), theme.toLowerCase()) }; await save(`dplanner-${U.uid()}`, c.title, c); }
+    } else if (it.kind === "paperpack") {
+      const B3 = window.EB_BOTS3, used = new Set(Object.values(S.items).filter(i => i.kind === "paperpack").map(i => i.data.palette)), pals = B3.PAPER_PALETTES.map((_, i) => i).filter(i => !used.has(i));
+      for (const pi of pals.slice(0, count)) { const on = B3.PAPER_PALETTES[d.palette].name, nn = B3.PAPER_PALETTES[pi].name; const rx = new RegExp(on, "gi"); await save(`paperpack-${U.uid()}`, d.title.replace(rx, nn), { ...d, palette: pi, papers: d.papers.map(p => ({ ...p, seed: Math.floor(Math.random() * 2 ** 31) })), title: d.title.replace(rx, nn), tags: d.tags.map(t => t.replace(new RegExp(on.toLowerCase(), "g"), nn.toLowerCase()).replace(new RegExp(on.split(" ")[0].toLowerCase(), "g"), nn.split(" ")[0].toLowerCase()).slice(0, 20)), description: d.description.replace(new RegExp(on.toLowerCase(), "g"), nn.toLowerCase()) }); }
     } else if (it.kind === "worksheet") {
       for (let i = 0; i < count; i++) await save(`worksheet-${U.uid()}`, `${d.title} (Set ${i + 2})`, { ...d, seeds: d.seeds.map(() => Math.floor(Math.random() * 2 ** 31)), title: `${d.title} (Set ${i + 2})`, palette: (d.palette || 0) + i + 1 });
     } else throw new Error("Variations aren't available for this kind of item.");
@@ -77,9 +83,13 @@
   }
 
   // ---- research ------------------------------------------------------------------------------------------------
-  const TYPES = { printable: "Printable", shirt: "Shirt / sticker design", notebook: "Notebook / journal", wallart: "Wall art", wordsearch: "Word search book", coloring: "Coloring book", ebook: "Ebook / guide" };
+  const TYPES = { printable: "Printable", shirt: "Shirt / sticker design", notebook: "Notebook / journal", wallart: "Wall art", wordsearch: "Word search book", coloring: "Coloring book", ebook: "Ebook / guide", dplanner: "Digital planner", paper: "Digital paper", party: "Party games", cards: "Card deck" };
   function guessType(k) {
     k = k.toLowerCase();
+    if (/digital planner|ipad planner|tablet planner|hyperlinked/.test(k)) return "dplanner";
+    if (/digital paper|seamless|pattern|scrapbook paper/.test(k)) return "paper";
+    if (/bingo|party game|shower game|party printable|game bundle/.test(k)) return "party";
+    if (/flash ?cards?|affirmation cards?|conversation cards?|prompt cards?|card deck/.test(k)) return "cards";
     if (/shirt|tee|sticker|hoodie|mug/.test(k)) return "shirt";
     if (/notebook|journal|log ?book|diary/.test(k)) return "notebook";
     if (/planner|printable|tracker|worksheet|calendar|checklist|template|log\b/.test(k) && !/wall art|poster/.test(k)) return "printable";
@@ -127,7 +137,7 @@
   const hasTrademark = t => TRADEMARKS.some(w => new RegExp(`\\b${w}\\b`).test(String(t).toLowerCase()));
   const STOP = new Set("a an and the for of to with in on your my our is it this that printable digital download instant pdf template file files gift gifts".split(" "));
   const words = s => (String(s).toLowerCase().match(/[a-z0-9']+/g) || []).filter(w => w.length > 2 && !STOP.has(w));
-  const ETSY_KINDS = ["printable", "wallart", "worksheet"];
+  const ETSY_KINDS = ["printable", "wallart", "worksheet", "dplanner", "paperpack", "partygame", "carddeck"];
   function nicheFor(it) {
     const d = it.data || {}, text = new Set(words(`${d.title || it.title} ${(d.tags || []).join(" ")} ${d.niche || d.keyword || ""}`));
     let best = null;
@@ -227,6 +237,9 @@ Return a JSON array of {"keyword": search phrase buyers type, "type": one of ${O
     else if (n.type === "ebook") await add("ebook_bot", "niche", k);
     else if (n.type === "wallart") await add("wall_art", "focus", clean(k, `wall art|prints?|posters?|decor|printable|digital download|${generic}`) || k);
     else if (n.type === "wordsearch" || n.type === "coloring") await add("puzzle_books", "themes", clean(k, `word search|word find|coloring|colouring|books?|adults?|large print|puzzles?|${generic}`) || k);
+    else if (n.type === "party") await add("party_bot", "occasions", k.replace(/\b(games?|bingo|printables?|party|ideas?|for)\b/gi, " ").replace(/\s+/g, " ").trim() || k);
+    else if (n.type === "cards") await add("cards_bot", "topics", k);
+    else if (n.type === "dplanner" || n.type === "paper") { /* these bots pick themes and seasons themselves */ }
     else await add("idea_bot", "focus", k);
     const item = Object.values(S.items).find(i => i.kind === "niche" && i.data.keyword === k);
     if (item) await Store.patch("items", item.id, { status: "using" });

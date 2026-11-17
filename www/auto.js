@@ -166,7 +166,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
   // ---- Etsy (Android app) --------------------------------------------------------------------------
   const ETSY_API = "https://api.etsy.com/v3/application", REDIRECT = "https://localhost/etsy-callback.html";
   // ebooks are left out on purpose: Etsy requires guides and instructions to be the seller's own work, not AI-written
-  const ETSY_KINDS = { printable: ["calendars & planners", "planners"], wallart: ["prints", "digital prints"], worksheet: ["worksheets", "educational", "learning"], design: null };
+  const ETSY_KINDS = { dplanner: ["digital planners", "planners", "calendars & planners"], paperpack: ["digital paper", "scrapbooking paper", "paper"], partygame: ["party games", "party supplies", "games", "paper"], carddeck: ["flash cards", "card games", "stationery", "games", "paper"], printable: ["calendars & planners", "planners"], wallart: ["prints", "digital prints"], worksheet: ["worksheets", "educational", "learning"], design: null };
   const Etsy = {
     connected: () => !!LS.get("eb_etsy_token", null),
     key() { const k = LS.get("eb_etsy_key", ""), s = LS.get("eb_etsy_secret", ""); return s ? `${k}:${s}` : k; },
@@ -226,6 +226,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
         walk(n.children || [], [...trail, n.name]);
       });
       walk(nodes, []);
+      if (!best && !manual && kind !== "printable") { Log.add("warn", `No close Etsy category for ${kind}; using the printables category`); const fb = await Etsy.taxonomy("printable"); cache[kind] = fb; LS.set("eb_etsy_tax", cache); return fb; }
       const id = best ? best.id : manual; if (!id) throw new Error(`Couldn't match an Etsy category for ${kind}. Set a category id in Settings.`);
       cache[kind] = id; LS.set("eb_etsy_tax", cache); Log.add("info", `Etsy category for ${kind}: ${best ? best.path : "manual " + id}`); return id;
     },
@@ -298,6 +299,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     } else if (it.kind === "wallart") {
       for (const [key] of A.SIZES) files.push([`${U.slug(d.title).slice(0, 40)}-${key}.jpg`, async () => { const cv = A.artCanvas(it, key, maxArt()); const b = await Files.canvasBlob(cv, "image/jpeg", 0.93); release(cv); return b; }]);
     } else if (it.kind === "worksheet") { files.push([`${U.slug(d.title)}.pdf`, async () => K.interior(it)]); }
+    if (window.EB_BOTS3) files.push(...window.EB_BOTS3.etsyFiles(it));
     return { images, files };
   }
   // phones with little memory get smaller (still print-quality at 150+ dpi) wall art files

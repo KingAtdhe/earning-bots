@@ -43,6 +43,8 @@
       this.shapes.push({ t: "line", x1, y1, x2, y2, color: color || this.th.rule, lw, dash });
     }
     circle(cx, cy, r, stroke, fill, lw = 0.7) { this.shapes.push({ t: "circle", cx, cy, r, stroke, fill, lw }); }
+    rrect(x, y, w, h, r, stroke, fill, lw = 0.8) { this.shapes.push({ t: "rrect", x, y, w, h, r, stroke, fill, lw }); }
+    link(x, y, w, h, page) { this.shapes.push({ t: "link", x, y, w, h, page }); } // clickable area in the PDF (page is 1-based)
     text(x, y, s, text, color, bold = false, align = "left") {
       this.shapes.push({ t: "text", x, y, s, text, color: color || this.th.ink, bold, align });
     }
@@ -410,6 +412,10 @@ PLEASE NOTE
       } else if (s.t === "line") {
         ctx.setLineDash(s.dash ? [2, 2.5] : []); ctx.strokeStyle = css(s.color); ctx.lineWidth = s.lw;
         ctx.beginPath(); ctx.moveTo(s.x1, s.y1); ctx.lineTo(s.x2, s.y2); ctx.stroke(); ctx.setLineDash([]);
+      } else if (s.t === "rrect") {
+        ctx.beginPath(); ctx.roundRect(s.x, s.y, s.w, s.h, s.r);
+        if (s.fill) { ctx.fillStyle = css(s.fill); ctx.fill(); }
+        if (s.stroke) { ctx.strokeStyle = css(s.stroke); ctx.lineWidth = s.lw; ctx.stroke(); }
       } else if (s.t === "circle") {
         ctx.beginPath(); ctx.arc(s.cx, s.cy, s.r, 0, Math.PI * 2);
         if (s.fill) { ctx.fillStyle = css(s.fill); ctx.fill(); }
@@ -430,6 +436,12 @@ PLEASE NOTE
         if (s.stroke) { doc.setDrawColor(...s.stroke); doc.setLineWidth(s.lw); doc.rect(s.x, s.y, s.w, s.h, "S"); }
       } else if (s.t === "line") {
         dash(s.dash); doc.setDrawColor(...s.color); doc.setLineWidth(s.lw); doc.line(s.x1, s.y1, s.x2, s.y2); dash(false);
+      } else if (s.t === "rrect") {
+        if (s.fill) doc.setFillColor(...s.fill);
+        if (s.stroke) { doc.setDrawColor(...s.stroke); doc.setLineWidth(s.lw); }
+        doc.roundedRect(s.x, s.y, s.w, s.h, s.r, s.r, s.fill && s.stroke ? "FD" : s.fill ? "F" : "S");
+      } else if (s.t === "link") {
+        doc.link(s.x, s.y, s.w, s.h, { pageNumber: s.page });
       } else if (s.t === "circle") {
         if (s.fill) doc.setFillColor(...s.fill);
         if (s.stroke) { doc.setDrawColor(...s.stroke); doc.setLineWidth(s.lw); }
@@ -521,5 +533,5 @@ PLEASE NOTE
 
   const canvasBlob = (cv, type = "image/png", q) => new Promise(res => cv.toBlob(res, type, q));
 
-  window.EB_DESIGNS = { ensureCalendars, MONTHS, SIZES, THEMES, LAYOUTS, BUNDLES, listingCopy, cleanTags, makePdf, coverCanvas, pageCanvas, pageOnly, canvasBlob };
+  window.EB_DESIGNS = { ensureCalendars, MONTHS, SIZES, THEMES, LAYOUTS, BUNDLES, listingCopy, cleanTags, makePdf, coverCanvas, pageCanvas, pageOnly, canvasBlob, Page, textWidth, drawShapes, pageToPdf, css, lighten };
 })();

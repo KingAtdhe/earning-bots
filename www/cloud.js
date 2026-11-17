@@ -6,7 +6,8 @@
   const S = Store.S;
   const toast = (m, k) => window.EB_APP.toast(m, k);
   const CLOUD_BOTS = ["niche_research", "product_factory", "calendar_bot", "idea_bot", "seo_optimizer", "maze_books", "coloring_books", "notebooks", "worksheets",
-    "pod_designs", "wall_art", "content_bot", "pin_bot", "article_bot", "ebook_bot", "newsletter_bot", "social_poster", "lead_finder", "job_scanner", "gig_bot", "price_watch"];
+    "pod_designs", "wall_art", "content_bot", "pin_bot", "article_bot", "ebook_bot", "newsletter_bot", "social_poster", "lead_finder", "job_scanner", "gig_bot", "price_watch",
+    "planner_bot", "paper_bot", "party_bot", "cards_bot"];
   let dirty = new Set(LS.get("eb_cloud_dirty", [])), timer = null, syncing = false, lastStatus = null;
   const saveDirty = () => LS.set("eb_cloud_dirty", [...dirty]);
 
