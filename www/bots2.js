@@ -296,6 +296,7 @@ Return a JSON array of {"id": "...", "title": "...", "tags": ["..."]} in the sam
     settings: [{ key: "perRun", label: "Calendars per run", type: "number", def: 3, min: 1, max: 8 }],
     async run(ctx) {
       const now = new Date(), year = now.getMonth() >= 6 ? now.getFullYear() + 1 : now.getFullYear();
+      D.ensureCalendars(year);
       const themes = Object.keys(D.THEMES), done = new Set(itemsOf("printable").map(i => i.id)); let made = 0;
       for (const start of U.shuffle(["mon", "sun"])) for (const theme of U.shuffle(themes)) {
         if (made >= ctx.cfg.perRun) break;

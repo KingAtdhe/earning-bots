@@ -5,7 +5,7 @@
   const { BOTS, KINDS, PLATFORMS } = window.EB_BOTS;
   const M = window.EB_MEDIA;
   const S = Store.S, esc = U.esc;
-  const VERSION = "3.3";
+  const VERSION = "4.0";
 
   const ICONS = {
     home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
@@ -126,6 +126,7 @@
   function autopilot() {
     for (const b of BOTS) {
       const hours = parseFloat(Store.botConfig(b.id).auto || 0); if (!hours || isOff(b) || ui.running[b.id] || missingNeeds(b)) continue;
+      if (window.EB_CLOUD && window.EB_CLOUD.runsBot(b.id)) continue; // the cloud runs this one
       const last = lastRun(b.id); if (last && Date.now() - Date.parse(last.startedAt) < hours * 3600e3) continue;
       runBot(b, true); break;
     }
@@ -420,6 +421,7 @@
         <label>Gumroad access token (sales sync)<input name="gumroad" type="password" value="${esc(LS.get("eb_gumroad", ""))}" autocomplete="off"></label>
         <p class="hint">Gumroad > Settings > Advanced > Applications > create one and generate a token.</p>`}
         <button class="primary wide">Save settings</button></form>
+      ${window.EB_CLOUD ? window.EB_CLOUD.settingsHtml() : ""}
       ${window.EB_AUTO.settingsSection()}
       <h4>Diagnostics</h4><p class="muted">Checks every connection and shows what to fix.</p><button class="ghost" data-act="diagnostics">${ic("bolt")}Run checks</button><div id="diag"></div>
       <h4>Activity log</h4><p class="muted">What the app did and any errors. Send this to Claude if something goes wrong.</p>
@@ -532,7 +534,7 @@ Return JSON {"proposal": "..."}`);
         return Files.save(`earnings-${new Date().toISOString().slice(0, 10)}.csv`, new Blob([rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n")], { type: "text/csv" }));
       }
       case "sync-gumroad": return window.EB_AUTO.syncSales();
-      default: if ((await window.EB_AUTO.handleAct(name, el)) === true) { renderSheet(); render(); } return;
+      default: if ((window.EB_CLOUD && await window.EB_CLOUD.handleAct(name)) || (await window.EB_AUTO.handleAct(name, el)) === true) { renderSheet(); render(); } return;
       case "backup": {
         const data = JSON.stringify({ app: "earning-bots", version: VERSION, exportedAt: U.now(), items: S.items, earnings: S.earnings, watches: S.watches, config: S.config }, null, 1);
         return Files.save(`earning-bots-backup-${new Date().toISOString().slice(0, 10)}.json`, new Blob([data], { type: "application/json" }));
@@ -580,7 +582,7 @@ Return JSON {"proposal": "..."}`);
   document.addEventListener("submit", async e => {
     e.preventDefault();
     const f = e.target, fd = new FormData(f);
-    if (await window.EB_AUTO.handleSubmit(f, fd)) { renderSheet(); return render(); }
+    if ((window.EB_CLOUD && await window.EB_CLOUD.handleSubmit(f, fd)) || await window.EB_AUTO.handleSubmit(f, fd)) { renderSheet(); return render(); }
     if (f.classList.contains("botform")) {
       const b = botById(f.dataset.bot), vals = {};
       for (const [k, v] of fd.entries()) if (k !== "active") vals[k] = k === "auto" ? parseFloat(v) || 0 : String(v);
@@ -631,7 +633,7 @@ Return JSON {"proposal": "..."}`);
   if (TABS.some(t => t[0] === start)) ui.tab = start;
   Store.onChange(render);
   render();
-  window.EB.startStorage();
+  window.EB.startStorage().then(() => window.EB_CLOUD && window.EB_CLOUD.start());
   setInterval(autopilot, 5 * 60 * 1000);
   setTimeout(() => window.EB_AUTO.reminders(), 3000);
   setTimeout(autopilot, 20000);

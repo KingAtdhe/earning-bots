@@ -23,6 +23,14 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Run the test suite (generators, storage, every bot, publishing)
         run: npm test
+      - name: Cloud tests (worker on the real Cloudflare runtime, locally)
+        env:
+          WRANGLER_SEND_METRICS: "false"
+        run: |
+          cd cloud && npm ci && npx wrangler d1 execute earning-bots-db --local --file schema.sql
+          (npx wrangler dev --port 8787 --ip 127.0.0.1 > /tmp/wdev.log 2>&1 &)
+          for i in $(seq 1 60); do curl -s localhost:8787/health && break; sleep 2; done
+          cd .. && node tests/cloud.mjs || (tail -50 /tmp/wdev.log; exit 1)
 
   apk:
     needs: test

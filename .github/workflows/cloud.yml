@@ -1,0 +1,65 @@
+name: Deploy cloud (24/7 bots)
+
+on:
+  push:
+    branches: [main]
+    paths: ["cloud/**", "www/*.js", ".github/workflows/cloud.yml"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER_SEND_METRICS: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Cloudflare secrets
+        id: check
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### Cloud not deployed yet"
+              echo "Add two repository secrets (Settings > Secrets and variables > Actions):"
+              echo "- CLOUDFLARE_API_TOKEN: a Cloudflare API token from the 'Edit Cloudflare Workers' template, plus D1 Edit permission"
+              echo "- CLOUDFLARE_ACCOUNT_ID: shown on your Cloudflare dashboard (Workers & Pages > right side)"
+              echo "Then run this workflow again (Actions > Deploy cloud > Run workflow)."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.ready == 'true'
+        with:
+          node-version: 22
+
+      - name: Install
+        if: steps.check.outputs.ready == 'true'
+        working-directory: cloud
+        run: npm ci
+
+      - name: Create or find the database, apply the schema
+        if: steps.check.outputs.ready == 'true'
+        working-directory: cloud
+        run: |
+          find_id() { npx wrangler d1 list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const l=JSON.parse(s);const d=l.find(x=>x.name==="earning-bots-db");process.stdout.write(d?d.uuid:"")}catch{}})'; }
+          ID=$(find_id)
+          if [ -z "$ID" ]; then npx wrangler d1 create earning-bots-db; ID=$(find_id); fi
+          if [ -z "$ID" ]; then echo "Could not create or find the D1 database"; exit 1; fi
+          sed -i "s/00000000-0000-0000-0000-000000000000/$ID/" wrangler.toml
+          npx wrangler d1 execute earning-bots-db --remote --file schema.sql
+
+      - name: Deploy
+        if: steps.check.outputs.ready == 'true'
+        working-directory: cloud
+        run: |
+          npx wrangler deploy 2>&1 | tee deploy.log
+          URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          echo "### Your cloud address" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$URL\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Paste it in the app: Settings > Cloud > Connect." >> "$GITHUB_STEP_SUMMARY"
+          curl -s "$URL/health" || true

@@ -96,7 +96,7 @@
     S,
     onChange(fn) { S.listeners.push(fn); },
     async save(col, id, obj) {
-      obj = clean(obj); S[col][id] = obj; changed();
+      obj = clean(obj); obj._u = Date.now(); S[col][id] = obj; changed();
       try {
         if (db) await db.doc(`${col}/${id}`).set(obj);
         else if (IDB.db) await IDB.put(col, id, obj);
@@ -105,6 +105,17 @@
         Log.add("error", `save ${col}/${id}: ${e.message || e.code}`);
         App.toast(e.code === "quota_exceeded" || e.name === "QuotaExceededError" ? "Storage is full. Delete old items or runs." : "Couldn't save: " + (e.message || e.code), "error");
       }
+      if (window.EB_CLOUD) window.EB_CLOUD.markDirty(col, id);
+    },
+    // a change that came from the cloud: store it locally without sending it back
+    async applyRemote(col, id, obj) {
+      if (!S[col]) return;
+      if (obj) S[col][id] = obj; else delete S[col][id];
+      changed();
+      try {
+        if (IDB.db) await (obj ? IDB.put(col, id, obj) : IDB.del(col, id));
+        else if (!db) LS.set("eb2_" + col, S[col]);
+      } catch (e) { Log.add("error", `store remote ${col}/${id}: ${e.message}`); }
     },
     async patch(col, id, fields) {
       const cur = S[col][id]; if (!cur) return;
@@ -117,6 +128,7 @@
         else if (IDB.db) await IDB.del(col, id);
         else LS.set("eb2_" + col, S[col]);
       } catch (e) { Log.add("error", `delete ${col}/${id}: ${e.message || e.code}`); App.toast("Couldn't delete: " + (e.message || e.code), "error"); }
+      if (window.EB_CLOUD) window.EB_CLOUD.markDirty(col, id);
     },
     config() { return S.config.main || {}; },
     async setConfig(fields) { await Store.save("config", "main", { ...(S.config.main || {}), ...fields }); },

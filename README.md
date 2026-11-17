@@ -1,4 +1,4 @@
-# Earning Bots 3.3
+# Earning Bots 4.0
 
 Worker bots that make things you can sell or turn into paid work, an approval inbox, a library of
 everything they made, and an earnings dashboard. The same app runs inside Claude and on Android.
@@ -81,13 +81,34 @@ Append an object to `BOTS` in `www/bots.js`: `id`, `title`, `desc`, `icon`, `cat
 `needs`, `settings` and `async run(ctx)`. Use `ctx.add(kind, title, data)` to send work to the Inbox.
 New output types go in `KINDS` (thumbnail, kit, copy buttons).
 
+## Cloud: bots that run 24/7
+`cloud/` is a Cloudflare Worker with a D1 database. Every 10 minutes it runs whichever bots are due
+(using the same bot code as the app), syncs Etsy and Gumroad sales, and checks prices, jobs and leads.
+The app becomes a dashboard: it syncs both ways, you approve and tap Publish on the phone
+(marketplaces require a person in the loop), and the phone does the uploading.
+
+**Set up once**
+1. Cloudflare dashboard > My Profile > API Tokens > Create Token > "Edit Cloudflare Workers" template, add the permission *Account > D1 > Edit*, create it.
+2. In this repo: Settings > Secrets and variables > Actions > New repository secret:
+   `CLOUDFLARE_API_TOKEN` (the token) and `CLOUDFLARE_ACCOUNT_ID` (Workers & Pages page, right side).
+3. Actions > **Deploy cloud** > Run workflow. The run summary shows your cloud address.
+4. App: Settings > Cloud > paste the address > Connect. Your keys (Claude, Etsy, Gumroad) are sent so the cloud can work.
+
+**Notes**
+- Runs on Cloudflare's free plan. Each check runs one bot, so runs stay small. If the activity log shows runs
+  "stopped before finishing", the Workers Paid plan (USD 5/month) lifts the time limit.
+- The Sudoku book bot stays on the phone (it needs more computing time than a free cloud run allows).
+- The cloud owns the Etsy login refresh once connected, so the app and cloud never conflict.
+- Your keys are stored in your own Cloudflare database; only an app holding the connection token can read or change data.
+- To connect a different phone: delete the `token_hash` row (`npx wrangler d1 execute earning-bots-db --remote --command "DELETE FROM meta WHERE key='token_hash'"`) and connect again.
+
 ## Engineering
 - **Storage**: on-device data lives in IndexedDB (no 5 MB browser limit, one record written per change); inside Claude it uses the artifact database. Old data migrates automatically.
 - **Resumable publishing**: Etsy and Printify uploads save progress after every step, so a retry continues instead of creating a duplicate listing or product.
 - **Listing validator**: blocks uploads with trademarked terms, over-long titles, invalid tags, short descriptions or missing prices.
 - **Performance**: long books render with pauses so the screen never freezes; photos and files are drawn one at a time and freed; wall-art resolution adapts to the phone's memory; long lists load 40 at a time.
 - **Activity log** (Settings): every run, publish and error, exportable for debugging on a real phone.
-- **Tests**: `npm test` runs 55 checks (puzzle/maze/calendar correctness, Etsy listing limits, storage, every bot inside Claude, and the full Android publishing flow against fake Etsy/Printify/Pinterest APIs, including failure and resume). CI runs them before every APK build; a failing test blocks the build.
+- **Tests**: `npm test` runs 55 app checks and `tests/cloud.mjs` 17 cloud checks (auth, two-way sync, newest-change-wins, scheduled runs, big items, deletes) against the worker on Cloudflare's runtime. App checks cover (puzzle/maze/calendar correctness, Etsy listing limits, storage, every bot inside Claude, and the full Android publishing flow against fake Etsy/Printify/Pinterest APIs, including failure and resume). CI runs them before every APK build; a failing test blocks the build.
 
 ## Develop
 ```

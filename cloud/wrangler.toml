@@ -1,0 +1,16 @@
+name = "earning-bots-cloud"
+main = "src/worker.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "earning-bots-db"
+# The deploy workflow fills in the real id for your Cloudflare account.
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[observability]
+enabled = true

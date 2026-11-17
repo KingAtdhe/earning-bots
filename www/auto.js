@@ -183,6 +183,9 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
       } catch (e) { toast("Etsy connection failed: " + e.message, "error"); }
     },
     async token() {
+      const C = window.EB_CLOUD;
+      // when the cloud is connected it owns the Etsy login (it refreshes the token), so ask it
+      if (C && C.connected() && LS.get("eb_cloud_etsy", false)) { const cur = LS.get("eb_etsy_token", null); if (cur && cur.expires_at - 120e3 > Date.now()) return cur; return await C.etsyToken(); }
       const t = LS.get("eb_etsy_token", null); if (!t) throw new Error("Connect Etsy in Settings first.");
       if (t.expires_at - 60e3 > Date.now()) return t;
       const fresh = await (await Web.post("https://api.etsy.com/v3/public/oauth/token", new URLSearchParams({ grant_type: "refresh_token", client_id: LS.get("eb_etsy_key", ""), refresh_token: t.refresh_token }).toString(), { "Content-Type": "application/x-www-form-urlencoded" })).json();
@@ -315,6 +318,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     if (!quiet || msgs.some(m => m.includes(":"))) toast(msgs.join(" · ") || "No sales platforms connected", msgs.some(m => m.includes(":")) ? "error" : "ok");
   }
   async function periodic() {
+    if (window.EB_CLOUD && window.EB_CLOUD.connected()) return; // the cloud syncs sales
     const a = auto(); if (a.salesSync && Date.now() - Date.parse(a.lastSync || 0) > 6 * 3600e3) await syncSales(true);
   }
 
@@ -338,8 +342,9 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     return `<label>New work<select name="approve">${[["manual", "Wait in my Inbox"], ["review", "Claude checks it, approves the good ones"], ["auto", "Approve everything automatically"]].map(([k, l]) => `<option value="${k}" ${v === k ? "selected" : ""}>${l}</option>`).join("")}</select></label>`;
   }
   function homeCard() {
-    const a = auto(), on = BOTS.filter(b => parseFloat(Store.botConfig(b.id).auto || 0)).length;
+    const a = auto(), on = BOTS.filter(b => parseFloat(Store.botConfig(b.id).auto || 0)).length, C = window.EB_CLOUD;
     const parts = [`${on}/${BOTS.length} bots scheduled`];
+    if (C && C.connected()) parts.unshift("running 24/7 in your cloud");
     if (a.etsyPublish && Etsy.connected()) parts.push("Etsy auto-publish");
     if (a.gmailDrafts) parts.push("Gmail drafts"); if (a.metricool) parts.push("Metricool");
     if (a.salesSync) parts.push("sales sync");
@@ -348,7 +353,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
       <button class="primary" data-act="publish-all">Publish</button></div></section>` : "";
     return qhtml + `<section class="card autopilot ${a.autopilot ? "on" : ""}"><div class="ap-head"><div><b>Autopilot</b><span>${a.autopilot ? esc(parts.join(" · ")) : "Bots only run when you tap Run"}</span></div>
       <button class="switch ${a.autopilot ? "on" : ""}" data-act="autopilot" aria-pressed="${!!a.autopilot}" aria-label="Autopilot"><i></i></button></div>
-      ${a.autopilot ? `<p class="hint">Runs while the app is open. Keep it open (or check in daily) and new work, approvals and sales keep flowing.</p>` : ""}</section>`;
+      ${a.autopilot ? `<p class="hint">${C && C.connected() ? "Your cloud runs the bots and syncs sales around the clock. Open the app to approve and publish." : "Runs while the app is open. Connect the cloud in Settings to run 24/7."}</p>` : ""}</section>`;
   }
   function settingsSection() {
     const a = auto(), m = a.metricool, tok = LS.get("eb_etsy_token", null);

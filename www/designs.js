@@ -313,10 +313,14 @@
       for (let m = 0; m < 12; m++) LAYOUTS[`cal_${year}_${String(m + 1).padStart(2, "0")}_${s}`] = [`${MONTHS[m][0] + MONTHS[m].slice(1).toLowerCase()} ${year}`, p => calendarMonth(p, year, m, mon)];
     }
   }
+  // registered on demand too: in the cloud, the clock reads 1970 while scripts load
+  const registered = new Set();
+  function ensureCalendars(year) { if (!registered.has(year)) { registered.add(year); registerCalendars(year); } }
   const thisYear = new Date().getFullYear();
-  for (let yy = thisYear - 1; yy <= thisYear + 2; yy++) registerCalendars(yy);
+  for (let yy = thisYear - 1; yy <= thisYear + 2; yy++) ensureCalendars(yy);
 
   function buildPage(key, sizeName, themeName) {
+    const cal = /^cal_(\d{4})_/.exec(key); if (cal) ensureCalendars(+cal[1]);
     const p = new Page(SIZES[sizeName], THEMES[themeName]);
     LAYOUTS[key][1](p);
     return p;
@@ -509,5 +513,5 @@ PLEASE NOTE
 
   const canvasBlob = (cv, type = "image/png", q) => new Promise(res => cv.toBlob(res, type, q));
 
-  window.EB_DESIGNS = { MONTHS, SIZES, THEMES, LAYOUTS, BUNDLES, listingCopy, cleanTags, makePdf, coverCanvas, pageCanvas, canvasBlob };
+  window.EB_DESIGNS = { ensureCalendars, MONTHS, SIZES, THEMES, LAYOUTS, BUNDLES, listingCopy, cleanTags, makePdf, coverCanvas, pageCanvas, canvasBlob };
 })();
