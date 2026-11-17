@@ -246,8 +246,10 @@ Return a JSON array of {"lines": ["..."], "niche": "...", "title": product title
         for (const it of ideas.slice(0, ctx.cfg.perRun)) {
           const lines = (it.lines || []).map(s => U.clampStr(s, 36)).filter(Boolean).slice(0, 4); if (!lines.length) continue;
           const slogan = lines.join(" "); if (existing.includes(slogan)) continue;
+          const intro = U.clampStr(it.description || `A fun “${slogan}” design for anyone who loves ${it.niche || "a good laugh"}.`, 400);
+          const description = `${intro}\n\n- Soft, comfortable unisex fit\n- Printed on demand just for you, so every order is made fresh\n- Makes a great gift for birthdays, holidays and just because\n\nPlease check the size chart in the photos before ordering.`;
           const data = { aiUsed: Claude.available(), lines, slogan, niche: U.clampStr(it.niche, 30), style: U.pick(M.STYLES), palette: Math.floor(Math.random() * M.INKS.length),
-            title: U.clampStr(it.title || slogan, 60), tags: (it.tags || []).map(t => U.clampStr(String(t).toLowerCase(), 20)).slice(0, 13), description: U.clampStr(it.description, 400), price: 19.99 };
+            title: U.clampStr(it.title || slogan, 60), tags: (it.tags || []).map(t => U.clampStr(String(t).toLowerCase(), 20)).slice(0, 13), description, price: 24.99 };
           await ctx.add("design", data.title, data, { price: data.price }); made++;
         }
         return `${made} designs ready to review.`;

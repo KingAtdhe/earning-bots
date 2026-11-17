@@ -41,25 +41,40 @@
       }
       throw new Error("No print provider offers this tee right now.");
     },
+    // Resumable: upload, product and publish steps are saved, so a retry never makes a second product
     async publish(it) {
-      const shop = LS.get("eb_printify_shop", null), d = it.data, bp = await Printify.blueprint();
-      const pal = M.INKS[d.palette % M.INKS.length], darkShirt = !/^#[ef]/i.test(pal.shirt);
-      const wantColors = darkShirt ? ["Black", "Navy", "Dark Grey Heather", "Heather Forest"] : ["White", "Natural", "Athletic Heather", "Heather Peach"];
-      const sizes = ["S", "M", "L", "XL", "2XL"];
-      const picked = bp.variants.filter(v => wantColors.includes(v.color) && sizes.includes(v.size));
-      if (!picked.length) throw new Error("No matching shirt colours at this print provider.");
-      const art = await Files.canvasBlob(M.designCanvas(it, 4500));
-      const up = await Printify.api("POST", "/uploads/images.json", { file_name: `${U.slug(d.slogan).slice(0, 40)}.png`, contents: await b64(art) });
-      const price = Math.round((Number(it.price) || 24.99) * 100);
-      const disclosure = d.aiUsed ? "\n\nDesign note: the slogan was written with AI assistance and the design was created and reviewed by our shop." : "";
-      const product = await Printify.api("POST", `/shops/${shop.id}/products.json`, {
-        title: String(d.title).slice(0, 140), description: `${d.description}${disclosure}`, tags: (d.tags || []).slice(0, 13),
-        blueprint_id: bp.id, print_provider_id: bp.provider,
-        variants: picked.map(v => ({ id: v.id, price: v.size === "2XL" ? price + 300 : price, is_enabled: true })),
-        print_areas: [{ variant_ids: picked.map(v => v.id), placeholders: [{ position: "front", images: [{ id: up.id, x: 0.5, y: 0.42, scale: 0.9, angle: 0 }] }] }],
-      });
-      await Printify.api("POST", `/shops/${shop.id}/products/${product.id}/publish.json`, { title: true, description: true, images: true, variants: true, tags: true, keyFeatures: true, shipping_template: true });
-      await Store.patch("items", it.id, { status: "listed", links: { ...(it.links || {}), Printify: `https://printify.com/app/store/products/${product.id}` }, data: { ...d, printifyId: product.id }, publishError: "" });
+      const issues = window.EB_AUTO.validate(it); if (issues.length) throw new Error("Fix before publishing: " + issues.join("; "));
+      const shop = LS.get("eb_printify_shop", null), bp = await Printify.blueprint();
+      const save = async job => { await Store.patch("items", it.id, { data: { ...S.items[it.id].data, printifyJob: job } }); return job; };
+      let d = S.items[it.id].data, job = { ...(d.printifyJob || {}) };
+      if (!job.uploadId) {
+        const cv = M.designCanvas(it, 4500), art = await Files.canvasBlob(cv); cv.width = 0;
+        const up = await Printify.api("POST", "/uploads/images.json", { file_name: `${U.slug(d.slogan).slice(0, 40)}.png`, contents: await b64(art) });
+        job = await save({ uploadId: up.id });
+      }
+      if (!job.productId) {
+        const pal = M.INKS[d.palette % M.INKS.length], darkShirt = !/^#[ef]/i.test(pal.shirt);
+        const wantColors = darkShirt ? ["Black", "Navy", "Dark Grey Heather", "Heather Forest"] : ["White", "Natural", "Athletic Heather", "Heather Peach"];
+        const sizes = ["S", "M", "L", "XL", "2XL"];
+        const picked = bp.variants.filter(v => wantColors.includes(v.color) && sizes.includes(v.size));
+        if (!picked.length) throw new Error("No matching shirt colours at this print provider.");
+        const price = Math.round((Number(it.price) || 24.99) * 100);
+        const disclosure = d.aiUsed ? "\n\nDesign note: the slogan was written with AI assistance and the design was created and reviewed by our shop." : "";
+        const product = await Printify.api("POST", `/shops/${shop.id}/products.json`, {
+          title: String(d.title).slice(0, 140), description: `${d.description}${disclosure}`, tags: (d.tags || []).slice(0, 13),
+          blueprint_id: bp.id, print_provider_id: bp.provider,
+          variants: picked.map(v => ({ id: v.id, price: v.size === "2XL" ? price + 300 : price, is_enabled: true })),
+          print_areas: [{ variant_ids: picked.map(v => v.id), placeholders: [{ position: "front", images: [{ id: job.uploadId, x: 0.5, y: 0.42, scale: 0.9, angle: 0 }] }] }],
+        });
+        job = await save({ ...job, productId: product.id });
+      }
+      if (!job.published) {
+        await Printify.api("POST", `/shops/${shop.id}/products/${job.productId}/publish.json`, { title: true, description: true, images: true, variants: true, tags: true, keyFeatures: true, shipping_template: true });
+        job = await save({ ...job, published: true });
+      }
+      d = S.items[it.id].data;
+      await Store.patch("items", it.id, { status: "listed", links: { ...(it.links || {}), Printify: `https://printify.com/app/store/products/${job.productId}` }, data: { ...d, printifyId: job.productId }, publishError: "" });
+      window.EB.Log.add("info", `Printify product ${job.productId} published`);
     },
   };
 

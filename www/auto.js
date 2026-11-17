@@ -2,7 +2,7 @@
    (Android app), Gmail drafts and Metricool scheduling (inside Claude), and the autopilot preset. */
 (function () {
   "use strict";
-  const { U, LS, Store, Claude, Web, Files, IS_NATIVE, IN_CLAUDE } = window.EB;
+  const { U, LS, Store, Claude, Web, Files, IS_NATIVE, IN_CLAUDE, Log } = window.EB;
   const { BOTS, KINDS } = window.EB_BOTS;
   const D = window.EB_DESIGNS, A = window.EB_ART, K = window.EB_KDP;
   const S = Store.S, esc = U.esc;
@@ -74,8 +74,10 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
 
   // ---- publishing with daily limits ---------------------------------------------------------------
   const CAPS = { Etsy: 15, Printify: 10, Pinterest: 20 };
-  function destination(it) {
+  function destination(it, ignoreValidation) {
     const C = window.EB_CONNECT;
+    if (it && it.publishBlocked) return "";
+    if (!ignoreValidation && it && it.status === "approved" && validate(it).length) return "";
     if (!it || it.status === "listed" || it.status === "pending" || it.status === "rejected") return "";
     if (Etsy.canPublish(it)) return "Etsy";
     if (it.kind === "design" && C.Printify.ready() && !(it.links || {}).Printify) return "Printify";
@@ -99,7 +101,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     let ok = 0, stop = "";
     for (const it of queue) {
       try { if (await publishItem(it)) ok++; }
-      catch (e) { if (/Daily .* limit/.test(e.message)) { stop = e.message; continue; } await Store.patch("items", it.id, { publishError: e.message }); }
+      catch (e) { if (/Daily .* limit/.test(e.message)) { stop = e.message; continue; } Log.add("error", `publish ${it.id}: ${e.message}`); await Store.patch("items", it.id, { publishError: e.message }); }
     }
     toast(`${ok} published${stop ? ". Some wait for tomorrow's limit." : ""}`, ok ? "ok" : "error");
   }
@@ -200,31 +202,54 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     },
     async taxonomy(kind) {
       const cache = LS.get("eb_etsy_tax", {}); if (cache[kind]) return cache[kind];
+      const manual = Number(LS.get("eb_etsy_taxonomy", 0));
       const words = ETSY_KINDS[kind] || []; const nodes = (await Web.json(`${ETSY_API}/seller-taxonomy/nodes`, { "x-api-key": Etsy.key() })).results || [];
-      let hit = null; const walk = (ns, trail) => ns.forEach(n => { const p = [...trail, n.name]; if (!hit && words.some(w => n.name.toLowerCase() === w)) hit = n.id; walk(n.children || [], p); });
+      // score every category by how well its name and path match; exact leaf names win
+      let best = null;
+      const walk = (ns, trail) => ns.forEach(n => {
+        const path = [...trail, n.name].join(" > ").toLowerCase(), name = n.name.toLowerCase();
+        let sc = 0; words.forEach((w, i) => { if (name === w) sc += 100 - i; else if (name.includes(w)) sc += 40 - i; else if (path.includes(w)) sc += 10; });
+        if (sc && (!(n.children || []).length)) sc += 5;
+        if (sc && (!best || sc > best.sc)) best = { id: n.id, sc, path };
+        walk(n.children || [], [...trail, n.name]);
+      });
       walk(nodes, []);
-      const id = hit || Number(LS.get("eb_etsy_taxonomy", 0)); if (!id) throw new Error("Couldn't find an Etsy category. Set one in Settings.");
-      cache[kind] = id; LS.set("eb_etsy_tax", cache); return id;
+      const id = best ? best.id : manual; if (!id) throw new Error(`Couldn't match an Etsy category for ${kind}. Set a category id in Settings.`);
+      cache[kind] = id; LS.set("eb_etsy_tax", cache); Log.add("info", `Etsy category for ${kind}: ${best ? best.path : "manual " + id}`); return id;
     },
+    // Resumable: progress is saved after every step, so a retry continues where it stopped
+    // instead of creating a second listing.
     async publish(it) {
-      const t = await Etsy.token(), d = it.data, shop = t.shop_id;
-      toast(`Publishing “${(d.title || it.title).slice(0, 40)}” on Etsy...`);
-      const disclosure = d.aiUsed ? "\n\nHOW THIS WAS MADE\nDesigned by our shop. The text in this design was written with the help of AI and reviewed by us before listing." : "";
-      const listing = await Etsy.api("POST", `/shops/${shop}/listings`, { quantity: 999, title: String(d.title || it.title).slice(0, 140), description: (d.description || "") + disclosure, price: Number(it.price || d.price || 4.9).toFixed(2),
-        who_made: "i_did", when_made: "made_to_order", taxonomy_id: await Etsy.taxonomy(it.kind), type: "download", is_supply: "false", tags: (d.tags || []).slice(0, 13).join(",") });
-      const id = listing.listing_id, imgs = [], files = [];
-      if (it.kind === "printable") {
-        const p = { bundle: d.bundle, theme: d.theme, shortName: d.shortName, title: d.title };
-        imgs.push(D.coverCanvas(p, 2000)); d.bundle.pages.slice(0, 9).forEach(k => imgs.push(D.pageCanvas(p, k, 2000)));
-        for (const size of Object.keys(D.SIZES)) { files.push([`${U.slug(d.shortName)}-${size}.pdf`, D.makePdf(p, size)]); files.push([`${U.slug(d.shortName)}-${size}-low-ink.pdf`, D.makePdf(p, size, true)]); }
-      } else if (it.kind === "wallart") {
-        imgs.push(A.roomMockup(it, 2000), A.artCanvas(it, "2x3", 2000));
-        for (const [key] of A.SIZES) files.push([`${U.slug(d.title).slice(0, 40)}-${key}.jpg`, await Files.canvasBlob(A.artCanvas(it, key, 4500), "image/jpeg", 0.93)]);
-      } else if (it.kind === "worksheet") { imgs.push(K.cover(it, 2000)); files.push([`${U.slug(d.title)}.pdf`, K.interior(it)]); }
-      for (let i = 0; i < imgs.length && i < 10; i++) { const f = new FormData(); f.append("image", await Files.canvasBlob(imgs[i], "image/jpeg", 0.9), `photo-${i + 1}.jpg`); f.append("rank", String(i + 1)); await Etsy.api("POST", `/shops/${shop}/listings/${id}/images`, f, true); }
-      for (let i = 0; i < files.length && i < 5; i++) { const f = new FormData(); f.append("file", files[i][1], files[i][0]); f.append("name", files[i][0]); f.append("rank", String(i + 1)); await Etsy.api("POST", `/shops/${shop}/listings/${id}/files`, f, true); }
-      if (auto().etsyActivate !== false) await Etsy.api("PATCH", `/shops/${shop}/listings/${id}`, { state: "active" });
+      const t = await Etsy.token(), shop = t.shop_id;
+      const issues = validate(it); if (issues.length) throw new Error("Fix before publishing: " + issues.join("; "));
+      const save = async job => { const cur = S.items[it.id]; await Store.patch("items", it.id, { data: { ...cur.data, etsyJob: job } }); return job; };
+      let d = S.items[it.id].data, job = { ...(d.etsyJob || {}) };
+      toast(`Publishing “${(d.title || it.title).slice(0, 40)}” on Etsy${job.listingId ? " (resuming)" : ""}...`);
+      const steps = assets(S.items[it.id]);
+      if (!job.listingId) {
+        const disclosure = d.aiUsed ? "\n\nHOW THIS WAS MADE\nDesigned by our shop. The text in this design was written with the help of AI and reviewed by us before listing." : "";
+        const listing = await Etsy.api("POST", `/shops/${shop}/listings`, { quantity: 999, title: String(d.title || it.title).slice(0, 140), description: (d.description || "") + disclosure, price: Number(it.price || d.price || 4.9).toFixed(2),
+          who_made: "i_did", when_made: "made_to_order", taxonomy_id: await Etsy.taxonomy(it.kind), type: "download", is_supply: "false", tags: (d.tags || []).slice(0, 13).join(",") });
+        job = await save({ listingId: listing.listing_id, images: 0, files: 0, active: false });
+        Log.add("info", `Etsy draft ${job.listingId} created for ${it.id}`);
+      }
+      const id = job.listingId;
+      for (let i = job.images; i < steps.images.length && i < 10; i++) {
+        const cv = steps.images[i](); const blob = await Files.canvasBlob(cv, "image/jpeg", 0.9); release(cv);
+        const f = new FormData(); f.append("image", blob, `photo-${i + 1}.jpg`); f.append("rank", String(i + 1));
+        await Etsy.api("POST", `/shops/${shop}/listings/${id}/images`, f, true);
+        job = await save({ ...job, images: i + 1 }); await U.sleep(0);
+      }
+      for (let i = job.files; i < steps.files.length && i < 5; i++) {
+        const [name, make] = steps.files[i]; const blob = await make();
+        const f = new FormData(); f.append("file", blob, name); f.append("name", name); f.append("rank", String(i + 1));
+        await Etsy.api("POST", `/shops/${shop}/listings/${id}/files`, f, true);
+        job = await save({ ...job, files: i + 1 }); await U.sleep(0);
+      }
+      if (!job.active && auto().etsyActivate !== false) { await Etsy.api("PATCH", `/shops/${shop}/listings/${id}`, { state: "active" }); job = await save({ ...job, active: true }); }
+      d = S.items[it.id].data;
       await Store.patch("items", it.id, { status: "listed", links: { ...(it.links || {}), Etsy: `https://www.etsy.com/listing/${id}` }, data: { ...d, etsyId: String(id) }, publishError: "" });
+      Log.add("info", `Etsy listing ${id} ${job.active ? "live" : "saved as draft"}`);
     },
     async syncSales() {
       const t = await Etsy.token(); let added = 0;
@@ -250,6 +275,37 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
       return added;
     },
   };
+
+  // lazy renderers: each photo or file is drawn only when it is uploaded, then freed
+  function release(cv) { try { cv.width = 0; cv.height = 0; } catch { /* ignore */ } }
+  function assets(it) {
+    const d = it.data, images = [], files = [];
+    if (it.kind === "printable") {
+      const p = { bundle: d.bundle, theme: d.theme, shortName: d.shortName, title: d.title };
+      images.push(() => D.coverCanvas(p, 2000)); d.bundle.pages.slice(0, 9).forEach(k => images.push(() => D.pageCanvas(p, k, 2000)));
+      for (const size of Object.keys(D.SIZES)) { files.push([`${U.slug(d.shortName)}-${size}.pdf`, async () => D.makePdf(p, size)]); files.push([`${U.slug(d.shortName)}-${size}-low-ink.pdf`, async () => D.makePdf(p, size, true)]); }
+    } else if (it.kind === "wallart") {
+      images.push(() => A.roomMockup(it, 2000), () => A.artCanvas(it, "2x3", 2000));
+      for (const [key] of A.SIZES) files.push([`${U.slug(d.title).slice(0, 40)}-${key}.jpg`, async () => { const cv = A.artCanvas(it, key, maxArt()); const b = await Files.canvasBlob(cv, "image/jpeg", 0.93); release(cv); return b; }]);
+    } else if (it.kind === "worksheet") { images.push(() => K.cover(it, 2000)); files.push([`${U.slug(d.title)}.pdf`, async () => K.interior(it)]); }
+    return { images, files };
+  }
+  // phones with little memory get smaller (still print-quality at 150+ dpi) wall art files
+  function maxArt() { const m = navigator.deviceMemory || 8; return m <= 3 ? 3000 : m <= 4 ? 3600 : 4500; }
+
+  // ---- listing validator: blocks uploads that marketplaces would reject or flag ---------------------
+  const TRADEMARKS = ["disney", "marvel", "pixar", "star wars", "harry potter", "hogwarts", "pokemon", "nintendo", "mario", "barbie", "nike", "adidas", "coca cola", "nfl", "nba", "mlb", "fifa", "taylor swift", "swiftie", "eras tour", "lego", "minecraft", "fortnite", "hello kitty", "sanrio", "bluey", "paw patrol", "peppa pig", "grinch", "snoopy", "peanuts", "friends tv", "stanley cup", "starbucks", "olympics", "super bowl", "march madness", "chanel", "louis vuitton", "gucci", "harley davidson", "jeep"];
+  function validate(it) {
+    const d = it.data || {}, issues = [], title = String(d.title || it.title || ""), text = `${title} ${(d.tags || []).join(" ")} ${d.description || ""} ${(d.lines || []).join(" ")} ${d.quote || ""}`.toLowerCase();
+    if (title.length < 10) issues.push("title is too short");
+    if (title.length > 140) issues.push("title is over 140 characters");
+    if ((d.tags || []).length && (d.tags.length > 13 || d.tags.some(t => String(t).length > 20))) issues.push("Etsy allows 13 tags of up to 20 characters");
+    if (it.kind !== "pin" && String(d.description || "").length < 80) issues.push("description is too short");
+    const tm = TRADEMARKS.filter(w => new RegExp(`\\b${w}\\b`).test(text));
+    if (tm.length) issues.push(`contains trademarked term(s): ${tm.join(", ")}`);
+    if (it.kind !== "pin" && !(Number(it.price || d.price) > 0)) issues.push("price is missing");
+    return issues;
+  }
 
   async function syncSales(quiet) {
     const msgs = [];
@@ -369,8 +425,9 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
   }
   function itemActions(it) {
     const out = [];
-    const where = destination(it);
-    if (where) out.push(`<button class="primary" data-act="publish-one" data-id="${esc(it.id)}">Publish on ${where}</button>`);
+    const where = destination(it, true), issues = where ? validate(it) : [];
+    if (where && !issues.length) out.push(`<button class="primary" data-act="publish-one" data-id="${esc(it.id)}">Publish on ${where}${(it.data.etsyJob || it.data.printifyJob) ? " (resume)" : ""}</button>`);
+    if (issues.length) out.push(`<p class="hint">Can't publish yet: ${esc(issues.join("; "))}. Edit it with the Listing Optimizer or delete it.</p>`);
     if (it.autoApproved && it.status === "approved") out.push(`<p class="hint">Approved automatically. It goes to marketplaces only when you tap Publish.</p>`);
     if (it.kind === "post" && it.status !== "pending" && !it.data.scheduledFor && mcp) out.push(`<button class="primary" data-act="schedule-post" data-id="${esc(it.id)}">Schedule in Metricool</button>`);
     if (it.kind === "lead" && it.data.email && mcp && !it.data.draftId) out.push(`<button class="ghost" data-act="gmail-draft" data-id="${esc(it.id)}">Draft in Gmail</button>`);
@@ -411,5 +468,5 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
   }
 
   setTimeout(() => Etsy.finish(), 1500);
-  window.EB_AUTO = { publishAll, destination, diagnostics, reminders, afterRun, approve, periodic, syncSales, approveField, homeCard, settingsSection, handleAct, handleSubmit, itemActions, Etsy, Metricool };
+  window.EB_AUTO = { validate, assets, release, publishAll, destination, diagnostics, reminders, afterRun, approve, periodic, syncSales, approveField, homeCard, settingsSection, handleAct, handleSubmit, itemActions, Etsy, Metricool };
 })();

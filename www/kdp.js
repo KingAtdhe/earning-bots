@@ -121,13 +121,14 @@
   }
   const pageNo = (doc, W, H, n) => { doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(130); doc.text(String(n), W / 2, H - 24, { align: "center" }); };
 
-  function interior(item) {
+  // async so long books (coloring pages are images) never freeze the screen
+  async function interior(item) {
     const d = item.data, J = window.jspdf.jsPDF;
     if (d.type === "maze") {
       const W = 612, H = 792, doc = new J({ unit: "pt", format: [W, H], compress: true }); let page = 2;
       frontMatter(doc, W, H, d);
       const mazes = d.seeds.map(s => maze(d.w, d.h, s));
-      mazes.forEach((m, i) => { doc.addPage(); page++; doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(20); doc.text(`Maze ${i + 1}`, W / 2, 70, { align: "center" }); drawMaze(doc, m, 66, 100, W - 132); doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.text("START →", 30, 96); pageNo(doc, W, H, page); });
+      for (const [i, m] of mazes.entries()) { if (i % 10 === 9) await new Promise(r => setTimeout(r, 0)); doc.addPage(); page++; doc.setFont("helvetica", "bold"); doc.setFontSize(16); doc.setTextColor(20); doc.text(`Maze ${i + 1}`, W / 2, 70, { align: "center" }); drawMaze(doc, m, 66, 100, W - 132); doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.text("START →", 30, 96); pageNo(doc, W, H, page); }
       doc.addPage(); page++; doc.setFont("helvetica", "bold"); doc.setFontSize(28); doc.setTextColor(20); doc.text("Solutions", W / 2, H / 2, { align: "center" });
       for (let i = 0; i < mazes.length; i += 4) {
         doc.addPage(); page++;
@@ -140,11 +141,12 @@
     if (d.type === "coloring") {
       const W = 612, H = 792, doc = new J({ unit: "pt", format: [W, H], compress: true });
       frontMatter(doc, W, H, d);
-      d.seeds.forEach((s, i) => {
-        doc.addPage(); const img = mandalaCanvas(s, 2200).toDataURL("image/jpeg", 0.88);
+      for (const s of d.seeds) {
+        doc.addPage(); const cv = mandalaCanvas(s, 2200), img = cv.toDataURL("image/jpeg", 0.88); cv.width = 0;
         doc.addImage(img, "JPEG", 36, (H - (W - 72)) / 2, W - 72, W - 72, undefined, "FAST");
         doc.addPage(); doc.setFontSize(9); doc.setTextColor(170); doc.text("This page is left blank so colors don't bleed through.", W / 2, H / 2, { align: "center" });
-      });
+        await new Promise(r => setTimeout(r, 0));
+      }
       return doc.output("blob");
     }
     if (d.type === "notebook") {

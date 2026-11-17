@@ -1,4 +1,4 @@
-# Earning Bots 3.2
+# Earning Bots 3.3
 
 Worker bots that make things you can sell or turn into paid work, an approval inbox, a library of
 everything they made, and an earnings dashboard. The same app runs inside Claude and on Android.
@@ -80,6 +80,14 @@ Builds are free while the repo is public. In a private repo they use your monthl
 Append an object to `BOTS` in `www/bots.js`: `id`, `title`, `desc`, `icon`, `category`, `earnsVia`,
 `needs`, `settings` and `async run(ctx)`. Use `ctx.add(kind, title, data)` to send work to the Inbox.
 New output types go in `KINDS` (thumbnail, kit, copy buttons).
+
+## Engineering
+- **Storage**: on-device data lives in IndexedDB (no 5 MB browser limit, one record written per change); inside Claude it uses the artifact database. Old data migrates automatically.
+- **Resumable publishing**: Etsy and Printify uploads save progress after every step, so a retry continues instead of creating a duplicate listing or product.
+- **Listing validator**: blocks uploads with trademarked terms, over-long titles, invalid tags, short descriptions or missing prices.
+- **Performance**: long books render with pauses so the screen never freezes; photos and files are drawn one at a time and freed; wall-art resolution adapts to the phone's memory; long lists load 40 at a time.
+- **Activity log** (Settings): every run, publish and error, exportable for debugging on a real phone.
+- **Tests**: `npm test` runs 55 checks (puzzle/maze/calendar correctness, Etsy listing limits, storage, every bot inside Claude, and the full Android publishing flow against fake Etsy/Printify/Pinterest APIs, including failure and resume). CI runs them before every APK build; a failing test blocks the build.
 
 ## Develop
 ```

@@ -45,7 +45,8 @@
       async kit(it) {
         const d = it.data, zip = new window.JSZip(), stem = U.slug(d.title).slice(0, 50);
         const files = zip.folder("1-digital-files"), photos = zip.folder("2-listing-photos");
-        for (const [key, , , sizes] of A.SIZES) files.file(`${stem}-${key}.jpg`, await Files.canvasBlob(A.artCanvas(it, key, 4500), "image/jpeg", 0.93));
+        const long = window.EB_AUTO ? (navigator.deviceMemory || 8) <= 3 ? 3000 : (navigator.deviceMemory || 8) <= 4 ? 3600 : 4500 : 4500;
+        for (const [key] of A.SIZES) { const cv = A.artCanvas(it, key, long); files.file(`${stem}-${key}.jpg`, await Files.canvasBlob(cv, "image/jpeg", 0.93)); cv.width = 0; await U.sleep(0); }
         photos.file("01-mockup.jpg", await Files.canvasBlob(A.roomMockup(it, 2000), "image/jpeg", 0.9));
         photos.file("02-print.jpg", await Files.canvasBlob(A.artCanvas(it, "2x3", 2000), "image/jpeg", 0.9));
         zip.file("LISTING.txt", `TITLE\n${d.title}\n\nPRICE\n${d.price.toFixed(2)}\n\nTAGS\n${d.tags.join(", ")}\n\nDESCRIPTION\n${d.description}\n\nFILES INCLUDED (upload all 5 as digital files)\n${A.SIZES.map(s => `- ${s[0]} ratio: prints at ${s[3]}`).join("\n")}\n`);

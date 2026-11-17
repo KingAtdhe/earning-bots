@@ -224,3 +224,4 @@ label.check input { width: 20px; height: 20px; margin: 1px 0 0; flex: none; acce
 .list .row .checkmark.on, .list .row .checkmark.bad { color: #fff; display: grid; }
 .list .row .checkmark { display: grid; }
 .publishq { border: 2px solid var(--ok); } .publishq .primary { flex: none; }
+.list.log { max-height: 50vh; overflow-y: auto; } .list.log .row span { font-size: 12.5px; }

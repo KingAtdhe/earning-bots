@@ -44,17 +44,67 @@
   const COLS = ["items", "earnings", "runs", "watches", "config"];
   const S = { items: {}, earnings: {}, runs: {}, watches: {}, config: {}, ready: false, mode: "local", listeners: [] };
   let db = null, sample = null, downloads = null;
-  const changed = () => S.listeners.forEach(fn => fn());
+  // batch change notifications: many saves in a row cause one re-render, not one per save
+  let pendingChange = false;
+  const changed = () => { if (pendingChange) return; pendingChange = true; setTimeout(() => { pendingChange = false; S.listeners.forEach(fn => { try { fn(); } catch (e) { Log.add("error", "render: " + e.message); } }); }, 0); };
+
+  // ---- on-device database (IndexedDB: no 5 MB limit, one record written per change) ----------------
+  const IDB = {
+    db: null,
+    open() {
+      return new Promise((res, rej) => {
+        if (!window.indexedDB) return rej(new Error("IndexedDB unavailable"));
+        const r = indexedDB.open("earning-bots", 1);
+        r.onupgradeneeded = () => { for (const c of [...COLS, "log"]) if (!r.result.objectStoreNames.contains(c)) r.result.createObjectStore(c); };
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); r.onblocked = () => rej(new Error("Database blocked by another tab"));
+      });
+    },
+    all(col) {
+      return new Promise((res, rej) => {
+        const out = {}, rq = IDB.db.transaction(col).objectStore(col).openCursor();
+        rq.onsuccess = () => { const c = rq.result; if (c) { out[c.key] = c.value; c.continue(); } else res(out); };
+        rq.onerror = () => rej(rq.error);
+      });
+    },
+    tx(col, fn) {
+      return new Promise((res, rej) => { const t = IDB.db.transaction(col, "readwrite"); fn(t.objectStore(col)); t.oncomplete = () => res(); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error || new Error("aborted")); });
+    },
+    put: (col, id, v) => IDB.tx(col, st => st.put(v, id)),
+    del: (col, id) => IDB.tx(col, st => st.delete(id)),
+  };
+  const clean = obj => JSON.parse(JSON.stringify(obj)); // drops undefined and functions, same as the cloud store
+
+  // ---- activity and error log -----------------------------------------------------------------------
+  const Log = {
+    entries: [],
+    add(level, msg) {
+      const e = { t: new Date().toISOString(), level, msg: String(msg).slice(0, 500) };
+      Log.entries.push(e); if (Log.entries.length > 300) Log.entries.splice(0, Log.entries.length - 300);
+      if (IDB.db) IDB.put("log", e.t + Math.random().toString(36).slice(2, 5), e).catch(() => {});
+      if (level === "error") console.error("[EB]", msg);
+    },
+    async load() {
+      if (!IDB.db) return;
+      try { const all = await IDB.all("log"), keys = Object.keys(all).sort(); Log.entries = keys.slice(-300).map(k => all[k]).concat(Log.entries);
+        for (const k of keys.slice(0, Math.max(0, keys.length - 300))) IDB.del("log", k).catch(() => {}); } catch { /* ignore */ }
+    },
+  };
+  window.addEventListener("error", e => Log.add("error", `${e.message} @ ${(e.filename || "").split("/").pop()}:${e.lineno}`));
+  window.addEventListener("unhandledrejection", e => Log.add("error", "Unhandled: " + ((e.reason && (e.reason.message || e.reason.code)) || e.reason)));
 
   const Store = {
     S,
     onChange(fn) { S.listeners.push(fn); },
     async save(col, id, obj) {
-      S[col][id] = obj; changed();
-      if (db) {
-        try { await db.doc(`${col}/${id}`).set(obj); }
-        catch (e) { App.toast(e.code === "quota_exceeded" ? "Storage is full. Delete old items." : "Couldn't save: " + (e.message || e.code), "error"); }
-      } else LS.set("eb2_" + col, S[col]);
+      obj = clean(obj); S[col][id] = obj; changed();
+      try {
+        if (db) await db.doc(`${col}/${id}`).set(obj);
+        else if (IDB.db) await IDB.put(col, id, obj);
+        else LS.set("eb2_" + col, S[col]);
+      } catch (e) {
+        Log.add("error", `save ${col}/${id}: ${e.message || e.code}`);
+        App.toast(e.code === "quota_exceeded" || e.name === "QuotaExceededError" ? "Storage is full. Delete old items or runs." : "Couldn't save: " + (e.message || e.code), "error");
+      }
     },
     async patch(col, id, fields) {
       const cur = S[col][id]; if (!cur) return;
@@ -62,8 +112,11 @@
     },
     async remove(col, id) {
       delete S[col][id]; changed();
-      if (db) { try { await db.doc(`${col}/${id}`).delete(); } catch (e) { App.toast("Couldn't delete: " + (e.message || e.code), "error"); } }
-      else LS.set("eb2_" + col, S[col]);
+      try {
+        if (db) await db.doc(`${col}/${id}`).delete();
+        else if (IDB.db) await IDB.del(col, id);
+        else LS.set("eb2_" + col, S[col]);
+      } catch (e) { Log.add("error", `delete ${col}/${id}: ${e.message || e.code}`); App.toast("Couldn't delete: " + (e.message || e.code), "error"); }
     },
     config() { return S.config.main || {}; },
     async setConfig(fields) { await Store.save("config", "main", { ...(S.config.main || {}), ...fields }); },
@@ -94,7 +147,22 @@
       try { downloads = await window.claude.use("downloads"); } catch { downloads = null; }
     }
     if (!db) {
-      for (const c of COLS) S[c] = LS.get("eb2_" + c, {});
+      try {
+        IDB.db = await IDB.open();
+        for (const c of COLS) S[c] = await IDB.all(c);
+        // one-time move from the old localStorage format
+        for (const c of COLS) {
+          const old = LS.get("eb2_" + c, null); if (!old) continue;
+          for (const [id, v] of Object.entries(old)) if (!S[c][id]) { S[c][id] = v; await IDB.put(c, id, clean(v)); }
+          try { localStorage.removeItem("eb2_" + c); } catch { /* ignore */ }
+          Log.add("info", `Moved ${Object.keys(old).length} ${c} to the on-device database`);
+        }
+        await Log.load();
+        if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+      } catch (e) {
+        Log.add("error", "On-device database unavailable, using basic storage: " + e.message);
+        IDB.db = null; for (const c of COLS) S[c] = LS.get("eb2_" + c, {});
+      }
       migrateLegacy(LS.get("eb_products", null));
       if (LS.get("eb_products", null)) {
         for (const [id, e] of Object.entries(LS.get("eb_earnings", {}))) if (!S.earnings[id]) Store.save("earnings", id, { ...e, itemId: e.sku || "" });
@@ -201,5 +269,5 @@
   // App is filled in by ui.js; core only needs toast/copyBox
   const App = window.EB_APP = window.EB_APP || { toast: m => console.log(m), copyBox: t => console.log(t) };
 
-  window.EB = { U, LS, Store, Claude, Web, Files, IS_NATIVE, IN_CLAUDE, startStorage };
+  window.EB = { Log, IDB, U, LS, Store, Claude, Web, Files, IS_NATIVE, IN_CLAUDE, startStorage };
 })();

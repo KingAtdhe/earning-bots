@@ -5,7 +5,7 @@
   const { BOTS, KINDS, PLATFORMS } = window.EB_BOTS;
   const M = window.EB_MEDIA;
   const S = Store.S, esc = U.esc;
-  const VERSION = "3.2";
+  const VERSION = "3.3";
 
   const ICONS = {
     home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
@@ -81,8 +81,9 @@
     if (pumping || !queue.length) return; pumping = true;
     setTimeout(() => {
       const { key, it } = queue.shift();
-      try { const cv = KINDS[it.kind].thumb(it, it.kind === "content" ? 540 : 800); thumbs.set(key, cv.toDataURL("image/jpeg", 0.82)); }
-      catch (e) { thumbs.set(key, ""); }
+      try { const cv = KINDS[it.kind].thumb(it, it.kind === "content" ? 540 : 800); thumbs.set(key, cv.toDataURL("image/jpeg", 0.82)); cv.width = 0; }
+      catch (e) { thumbs.set(key, ""); window.EB.Log.add("error", `thumbnail ${it.id}: ${e.message}`); }
+      while (thumbs.size > 150) thumbs.delete(thumbs.keys().next().value); // keep memory bounded
       document.querySelectorAll(`img[data-thumb="${CSS.escape(it.id)}"]`).forEach(img => { img.src = thumbs.get(key); img.classList.add("loaded"); });
       pumping = false; pump();
     }, 16);
@@ -108,6 +109,7 @@
     try { summary = await bot.run(ctx); } catch (e) { status = "error"; summary = "Failed: " + (e.message || e); }
     if (newIds.length) { try { ctx.progress("Checking and automating..."); const extra = await window.EB_AUTO.afterRun(bot, newIds); if (extra) summary += ` (${extra})`; } catch (e) { summary += ` (automation: ${e.message})`; } }
     delete ui.running[bot.id];
+    window.EB.Log.add(status === "ok" ? "info" : "error", `${bot.title}: ${summary}`);
     await Store.save("runs", U.uid(), { bot: bot.id, startedAt: started, finishedAt: U.now(), status, summary, made });
     const runs = Object.entries(S.runs).sort((a, b) => b[1].startedAt.localeCompare(a[1].startedAt));
     for (const [id] of runs.slice(60)) Store.remove("runs", id);
@@ -267,14 +269,15 @@
   function viewInbox() {
     const pending = items().filter(i => i.status === "pending").sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const botsWith = [...new Set(pending.map(i => i.bot))];
-    const shown = ui.inboxBot === "all" ? pending : pending.filter(i => i.bot === ui.inboxBot);
+    const allShown = ui.inboxBot === "all" ? pending : pending.filter(i => i.bot === ui.inboxBot), shown = allShown.slice(0, ui.inboxLimit || 30);
     return `${header("Inbox", pending.length ? `${pending.length} item${pending.length > 1 ? "s" : ""} waiting for your approval` : "All caught up")}
       ${botsWith.length > 1 ? `<div class="chips">${["all", ...botsWith].map(id => `<button class="chip ${ui.inboxBot === id ? "on" : ""}" data-inbox="${id}">${esc(id === "all" ? "All" : botById(id)?.title || id)}</button>`).join("")}</div>` : ""}
-      ${shown.length > 1 ? `<div class="btns spread"><button class="primary" data-act="approve-all">${ic("check")}Approve all ${shown.length}</button><button class="ghost" data-act="reject-all">${ic("x")}Reject all</button></div>` : ""}
+      ${allShown.length > 1 ? `<div class="btns spread"><button class="primary" data-act="approve-all">${ic("check")}Approve all ${allShown.length}</button><button class="ghost" data-act="reject-all">${ic("x")}Reject all</button></div>` : ""}
       ${shown.length ? `<div class="grid">${shown.map(it => `<article class="card item">
           <button class="open" data-item="${esc(it.id)}">${itemVisual(it)}<div class="meta"><span class="kind">${esc(KINDS[it.kind]?.label || it.kind)}</span><b>${esc(it.title)}</b><span class="muted">${esc(KINDS[it.kind]?.summary?.(it) || "")}</span></div></button>
           <div class="btns"><button class="primary" data-act="approve" data-id="${esc(it.id)}">${ic("check")}Approve</button><button class="ghost" data-act="reject" data-id="${esc(it.id)}" aria-label="Reject">${ic("x")}</button></div></article>`).join("")}</div>`
-        : `<div class="emptystate">${ic("inbox")}<b>Nothing to review</b><span>New work from your bots lands here.</span><button class="primary" data-tab="bots">${ic("play")}Run a bot</button></div>`}`;
+        : `<div class="emptystate">${ic("inbox")}<b>Nothing to review</b><span>New work from your bots lands here.</span><button class="primary" data-tab="bots">${ic("play")}Run a bot</button></div>`}
+      ${allShown.length > shown.length ? `<button class="ghost wide" data-act="inbox-more">Show more (${allShown.length - shown.length} left)</button>` : ""}`;
   }
 
   const LIB_FILTERS = [["all", "All"], ["products", "Printables & art"], ["books", "Books"], ["design", "Designs"], ["content", "Content"], ["leads", "Leads & jobs"], ["deal", "Deals"], ["research", "Research"]];
@@ -285,15 +288,17 @@
     if (ui.libStatus !== "all") list = list.filter(i => i.status === ui.libStatus);
     if (ui.search) { const q = ui.search.toLowerCase(); list = list.filter(i => (i.title + " " + JSON.stringify(i.data.tags || "")).toLowerCase().includes(q)); }
     list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const total = list.length, shownN = ui.libLimit || 40; list = list.slice(0, shownN);
     const kindsHere = (GROUPS[ui.libKind] || []).length === 1 ? KINDS[GROUPS[ui.libKind][0]] : null;
     const statuses = kindsHere && kindsHere.pipeline ? kindsHere.pipeline : ui.libKind === "leads" ? ["new", "contacted", "applied", "won", "lost"] : ["approved", "listed"];
     const labels = { approved: "To list", listed: "Live", new: "New", contacted: "Contacted", applied: "Applied", won: "Won", lost: "Lost", bought: "Bought", sold: "Sold", skipped: "Skipped", using: "In use" };
-    return `${header("Library", `${list.length} item${list.length === 1 ? "" : "s"}`)}
+    return `${header("Library", `${total} item${total === 1 ? "" : "s"}`)}
       <label class="searchbox">${ic("search")}<input type="search" id="libsearch" placeholder="Search your library" value="${esc(ui.search)}"></label>
       <div class="chips">${LIB_FILTERS.map(([k, l]) => `<button class="chip ${ui.libKind === k ? "on" : ""}" data-lib="${k}">${l}</button>`).join("")}</div>
       <div class="chips small">${["all", ...statuses].map(s => `<button class="chip ${ui.libStatus === s ? "on" : ""}" data-libs="${s}">${s === "all" ? "Any status" : labels[s] || s}</button>`).join("")}</div>
       ${list.length ? `<div class="grid">${list.map(it => `<article class="card item"><button class="open" data-item="${esc(it.id)}">${itemVisual(it)}<div class="meta"><span class="kind">${esc(KINDS[it.kind]?.label || it.kind)} · <span class="st ${it.status}">${esc(labels[it.status] || it.status)}</span></span><b>${esc(it.title)}</b><span class="muted">${esc(KINDS[it.kind]?.summary?.(it) || "")}</span></div></button></article>`).join("")}</div>`
-        : `<div class="emptystate">${ic("library")}<b>Nothing here yet</b><span>Approved items and new leads appear here.</span></div>`}`;
+        : `<div class="emptystate">${ic("library")}<b>Nothing here yet</b><span>Approved items and new leads appear here.</span></div>`}
+      ${total > shownN ? `<button class="ghost wide" data-act="lib-more">Show more (${total - shownN} left)</button>` : ""}`;
   }
 
   function viewMoney() {
@@ -417,6 +422,8 @@
         <button class="primary wide">Save settings</button></form>
       ${window.EB_AUTO.settingsSection()}
       <h4>Diagnostics</h4><p class="muted">Checks every connection and shows what to fix.</p><button class="ghost" data-act="diagnostics">${ic("bolt")}Run checks</button><div id="diag"></div>
+      <h4>Activity log</h4><p class="muted">What the app did and any errors. Send this to Claude if something goes wrong.</p>
+      <div class="btns wrap"><button class="ghost" data-act="show-log">Show log</button><button class="ghost" data-act="export-log">${ic("download")}Export log</button></div><div id="logbox"></div>
       <h4>Your data</h4><p class="muted">${S.mode === "claude" ? "Saved in this artifact's private database, wherever you open it in Claude." : "Saved on this device. Back it up now and then."} ${items().length} items, ${Object.keys(S.earnings).length} sales.</p>
       <div class="btns wrap"><button class="ghost" data-act="backup">${ic("download")}Back up</button><label class="btn ghost">${ic("sync")}Restore<input type="file" id="restore" accept=".json,application/json" hidden></label></div>
       <p class="foot">Earning Bots ${VERSION} · ${S.mode === "claude" ? "running in Claude" : IS_NATIVE ? "Android app" : "browser"}</p>`;
@@ -498,6 +505,17 @@ Return JSON {"proposal": "..."}`);
       }
       case "use-niche": await window.EB_WIN.useNiche(it.data); toast(`“${it.data.keyword}” sent to your bots`); return renderSheet();
       case "variations": { try { const n = await window.EB_WIN.variations(it); toast(`${n} variation${n === 1 ? "" : "s"} waiting in your Inbox`); } catch (e) { toast(e.message, "error"); } return; }
+      case "show-log": {
+        const box = document.getElementById("logbox"), L = window.EB.Log.entries.slice(-60).reverse();
+        box.innerHTML = L.length ? `<div class="list mini log">${L.map(e => `<div class="row static"><div><span class="${e.level === "error" ? "errtext" : ""}">${esc(e.msg)}</span></div><time>${esc(e.t.slice(5, 16).replace("T", " "))}</time></div>`).join("")}</div>` : `<p class="muted">Nothing logged yet.</p>`;
+        return;
+      }
+      case "export-log": {
+        const txt = [`Earning Bots ${VERSION} · ${S.mode} · ${IS_NATIVE ? "Android" : IN_CLAUDE ? "Claude" : "browser"} · ${navigator.userAgent}`, `items ${items().length} · sales ${Object.keys(S.earnings).length}`, "", ...window.EB.Log.entries.map(e => `${e.t} ${e.level.toUpperCase()} ${e.msg}`)].join("\n");
+        return Files.save(`earning-bots-log-${new Date().toISOString().slice(0, 10)}.txt`, new Blob([txt], { type: "text/plain" }));
+      }
+      case "inbox-more": ui.inboxLimit = (ui.inboxLimit || 30) + 30; return render();
+      case "lib-more": ui.libLimit = (ui.libLimit || 40) + 40; return render();
       case "dismiss-setup": return Store.setConfig({ setupDismissed: true });
       case "diagnostics": {
         const box = document.getElementById("diag"); box.innerHTML = `<p class="muted"><span class="spin"></span> Checking...</p>`;
@@ -550,7 +568,7 @@ Return JSON {"proposal": "..."}`);
     if (t.dataset.tab) return setTab(t.dataset.tab);
     if (t.dataset.go) { const [tab, f] = t.dataset.go.split(":"); if (tab === "library") { ui.libKind = f === "leads" ? "leads" : "all"; ui.libStatus = f === "ready" ? "approved" : f === "listed" ? "listed" : "all"; } return setTab(tab); }
     if (t.dataset.item) return openSheet({ type: "item", id: t.dataset.item });
-    if (t.dataset.lib) { ui.libKind = t.dataset.lib; ui.libStatus = "all"; return render(); }
+    if (t.dataset.lib) { ui.libKind = t.dataset.lib; ui.libStatus = "all"; ui.libLimit = 40; return render(); }
     if (t.dataset.libs) { ui.libStatus = t.dataset.libs; return render(); }
     if (t.dataset.inbox) { ui.inboxBot = t.dataset.inbox; return render(); }
     if (t.dataset.period) { ui.period = +t.dataset.period; return render(); }
