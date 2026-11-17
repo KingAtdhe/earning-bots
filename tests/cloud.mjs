@@ -42,6 +42,8 @@ for (let i = 0; i < 4; i++) await api("POST", "/tick", null, token);
 r = await api("GET", "/sync?since=0", null, token);
 const cloudItems = r.data.docs.filter(d => d.col === "items" && d.data && d.data.cloud);
 check("cloud bots made items on their schedule", cloudItems.length >= 6, `got ${cloudItems.length}`);
+const sell = cloudItems.filter(d => ["printable", "wallart", "kdpbook"].includes(d.data.kind));
+check("the cloud runs the quality check (text, market, duplicates)", sell.length > 0 && sell.every(d => d.data.qa && d.data.qa.score >= 0 && d.data.qa.visual === false), JSON.stringify(sell.map(d => d.data.qa && d.data.qa.score)));
 check("auto-approve setting applied in the cloud", cloudItems.some(d => d.data.bot === "product_factory" && d.data.status === "approved"));
 const runs = r.data.docs.filter(d => d.col === "runs" && d.data && d.data.cloud);
 check("each due bot ran once", new Set(runs.map(d => d.data.bot)).size === runs.length && runs.length === 4, JSON.stringify(runs.map(d => d.data.bot)));
@@ -51,6 +53,8 @@ check("nothing runs twice before its interval", (await api("GET", "/sync?since=0
 console.log("Phone receives and edits");
 await pg.evaluate(() => window.EB_CLOUD.sync());
 const onPhone = await pg.evaluate(() => Object.values(window.EB.Store.S.items).filter(i => i.cloud).length);
+await pg.waitForTimeout(1500);
+check("the phone adds the image check to cloud-made designs", await pg.evaluate(() => { const its = Object.values(window.EB.Store.S.items).filter(i => i.cloud && i.qa && ["printable", "wallart"].includes(i.kind)); return its.length > 0 && its.some(i => i.qa.visual); }));
 check("cloud items arrived on the phone", onPhone === cloudItems.length, `${onPhone} vs ${cloudItems.length}`);
 const target = cloudItems.find(d => d.data.status === "pending").id;
 await pg.evaluate(id => window.EB.Store.patch("items", id, { status: "approved", approvedAt: new Date().toISOString() }), target);

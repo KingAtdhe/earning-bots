@@ -187,6 +187,24 @@
     throw new Error("Unknown book type");
   }
 
+  // one worksheet page as an image (for listing photos)
+  function worksheetPage(item, idx = 0, key = false, width = 1100) {
+    const d = item.data, k = width / 612, H = Math.round(792 * k), cv = document.createElement("canvas"); cv.width = width; cv.height = H;
+    const x = cv.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, width, H); x.scale(k, k);
+    x.fillStyle = "#1e1e1e"; x.font = "700 20px Inter, Arial, sans-serif"; x.fillText(`${d.opName} ${key ? "Answer Key" : "Practice"} ${idx + 1}`, 50, 64);
+    x.fillStyle = "#5a5a5a"; x.font = "400 11px Inter, Arial, sans-serif"; x.fillText("Name ____________________   Date __________   Score ____ / 30", 50, 88);
+    problems(d.op, d.level, 30, d.seeds[idx % d.seeds.length]).forEach(([a, b, ans], i) => {
+      const px = 80 + (i % 5) * 104, py = 150 + Math.floor(i / 5) * 104;
+      x.textAlign = "right"; x.fillStyle = "#191919"; x.font = "700 19px 'Courier New', monospace";
+      x.fillText(String(a), px + 52, py); x.fillText(`${OPS[d.op]} ${b}`, px + 52, py + 24);
+      x.fillRect(px, py + 31, 56, 1.4);
+      if (key) { x.fillStyle = "#c83232"; x.fillText(String(ans), px + 52, py + 56); }
+      x.textAlign = "left";
+    });
+    x.fillStyle = "#969696"; x.font = "400 8px Inter, Arial, sans-serif"; x.textAlign = "center"; x.fillText(d.title, 306, 764);
+    return cv;
+  }
+
   // ---- covers ----------------------------------------------------------------------------------
   const PALETTES = [["#16324f", "#f2c14e"], ["#2d6a4f", "#f1faee"], ["#7b2d26", "#f6d8ae"], ["#3d348b", "#f7b801"], ["#0b525b", "#ffd6a5"], ["#5a189a", "#ffd166"], ["#283618", "#fefae0"], ["#9a031e", "#fcd5ce"], ["#14213d", "#fca311"]];
   function cover(item, width = 2400) {
@@ -239,5 +257,5 @@
     return cv;
   }
 
-  window.EB_KDP = { maze, mandalaCanvas, problems, interior, cover, OPS, rng };
+  window.EB_KDP = { maze, mandalaCanvas, problems, interior, cover, worksheetPage, OPS, rng };
 })();

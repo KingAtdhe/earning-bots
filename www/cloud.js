@@ -64,7 +64,7 @@
     },
     async sync() {
       if (!Cloud.connected() || syncing) return; syncing = true;
-      try { const sent = await Cloud.push(), got = await Cloud.pull(); LS.set("eb_cloud_last", U.now()); if (sent || got) Log.add("info", `Cloud sync: sent ${sent}, received ${got}`); }
+      try { const sent = await Cloud.push(), got = await Cloud.pull(); LS.set("eb_cloud_last", U.now()); if (sent || got) Log.add("info", `Cloud sync: sent ${sent}, received ${got}`); if (got && window.EB_QA) setTimeout(() => window.EB_QA.backfill().catch(e => Log.add("warn", "Image check: " + e.message)), 500); }
       catch (e) { Log.add("error", "Cloud sync: " + e.message); throw e; }
       finally { syncing = false; }
     },

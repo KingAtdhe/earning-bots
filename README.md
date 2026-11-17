@@ -1,4 +1,4 @@
-# Earning Bots 4.0
+# Earning Bots 4.1
 
 Worker bots that make things you can sell or turn into paid work, an approval inbox, a library of
 everything they made, and an earnings dashboard. The same app runs inside Claude and on Android.
@@ -81,6 +81,19 @@ Append an object to `BOTS` in `www/bots.js`: `id`, `title`, `desc`, `icon`, `cat
 `needs`, `settings` and `async run(ctx)`. Use `ctx.add(kind, title, data)` to send work to the Inbox.
 New output types go in `KINDS` (thumbnail, kit, copy buttons).
 
+## Quality check, market data and listing photos (4.1)
+- **Quality check** on everything the bots make, before it reaches your Inbox: tidies titles and tags, catches
+  near-duplicates of earlier listings, looks at the main image (empty or washed-out designs) and, if Claude is
+  available, has Claude judge the main photo like a buyer (text cut off, readability, appeal). Each item gets a
+  0-100 score with reasons. Clearly broken items go to Rejected with the reason; auto-approve needs 50+ and
+  "Claude checks it" needs 70+. Items the cloud makes get their image check when they reach the phone.
+- **Market data**: Niche Research now reads the top 100 Etsy listings per niche: the real price range (digital
+  listings), the tags top sellers use, and whether listings under 4 months old still win favorites. New items that
+  match a niche get those tags (only relevant ones, never trademarks) and an out-of-range price moved into the range.
+- **Listing photos**: printables get cover, desk flat-lay, what's included, clipboard, tablet and details photos;
+  wall art gets living room, bedroom and office scenes, a sizes image, details and a close-up; worksheets get 6.
+  Everything written on a photo matches the files the buyer gets.
+
 ## Cloud: bots that run 24/7
 `cloud/` is a Cloudflare Worker with a D1 database. Every 10 minutes it runs whichever bots are due
 (using the same bot code as the app), syncs Etsy and Gumroad sales, and checks prices, jobs and leads.
@@ -108,7 +121,7 @@ The app becomes a dashboard: it syncs both ways, you approve and tap Publish on 
 - **Listing validator**: blocks uploads with trademarked terms, over-long titles, invalid tags, short descriptions or missing prices.
 - **Performance**: long books render with pauses so the screen never freezes; photos and files are drawn one at a time and freed; wall-art resolution adapts to the phone's memory; long lists load 40 at a time.
 - **Activity log** (Settings): every run, publish and error, exportable for debugging on a real phone.
-- **Tests**: `npm test` runs 55 app checks and `tests/cloud.mjs` 17 cloud checks (auth, two-way sync, newest-change-wins, scheduled runs, big items, deletes) against the worker on Cloudflare's runtime. App checks cover (puzzle/maze/calendar correctness, Etsy listing limits, storage, every bot inside Claude, and the full Android publishing flow against fake Etsy/Printify/Pinterest APIs, including failure and resume). CI runs them before every APK build; a failing test blocks the build.
+- **Tests**: `npm test` runs 70 app checks and `tests/cloud.mjs` 19 cloud checks (auth, two-way sync, newest-change-wins, scheduled runs, big items, deletes) against the worker on Cloudflare's runtime. App checks cover (puzzle/maze/calendar correctness, Etsy listing limits, storage, every bot inside Claude, and the full Android publishing flow against fake Etsy/Printify/Pinterest APIs, including failure and resume). CI runs them before every APK build; a failing test blocks the build.
 
 ## Develop
 ```

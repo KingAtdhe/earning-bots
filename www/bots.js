@@ -45,10 +45,10 @@
         }
         customer.file("HOW-TO-PRINT.txt", "Thank you for your purchase!\n\n- The -A4 files are for A4 paper (Europe and most of the world).\n- The -US-Letter files are for US Letter paper (USA and Canada).\n- The -low-ink files print with far less ink.\n- Print at 100% / \"Actual size\" for the best result.\n");
         gum.file(`${stem}.zip`, await customer.generateAsync({ type: "blob" }));
-        const cover = await Files.canvasBlob(D.coverCanvas(p, 2000)); etsy.file("01-cover.png", cover); gum.file("cover.png", cover);
-        let i = 2; for (const key of p.bundle.pages.slice(0, 9)) etsy.file(`${String(i++).padStart(2, "0")}-${key}.png`, await Files.canvasBlob(D.pageCanvas(p, key, 2000)));
+        gum.file("cover.png", await Files.canvasBlob(D.coverCanvas(p, 2000)));
+        await window.EB_SCENES.addPhotos(it, etsy.folder("photos"));
         zip.file("LISTING.txt", listingText(it, p.title, p.price, p.tags, p.description,
-          `ETSY: Digital file listing. Photos from 1-upload-to-etsy (cover first), both PDFs as digital files.\nGUMROAD: New product, name it "${p.shortName}", upload the zip and cover.png.`));
+          `ETSY: Digital file listing. Photos from 1-upload-to-etsy/photos in number order (01 is the thumbnail), all 4 PDFs as digital files.\nGUMROAD: New product, name it "${p.shortName}", upload the zip and cover.png.`));
         return { blob: await zip.generateAsync({ type: "blob" }), name: `${stem}-upload-kit.zip` };
       },
       copy: it => [["Title", it.data.title], ["Description", it.data.description], ["Tags", (it.data.tags || []).join(", ")]],

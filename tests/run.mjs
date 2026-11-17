@@ -107,6 +107,8 @@ console.log("Inside Claude (all bots, kits)");
     const run = await runBot(pg, id);
     check(`bot ${id} runs`, run && run.status === "ok", run ? run.summary : "no run");
   }
+  const ai = await pg.evaluate(() => { const its = Object.values(window.EB.Store.S.items).filter(i => i.qa && i.qa.ai); return { n: its.length, seen: window.__seen, ex: its[0] && { score: its[0].qa.score, issues: its[0].qa.issues.map(x => x[1]) } }; });
+  check("Claude looks at each new design's main photo (capped per run)", ai.n > 0 && ai.seen === ai.n && ai.ex.issues.some(t => /thumbnail/.test(t)) && ai.ex.score < 100, JSON.stringify(ai));
   await pg.click("#nav [data-tab=inbox]"); await pg.evaluate(() => document.querySelector("[data-act=approve-all]") && document.querySelector("[data-act=approve-all]").click());
   await pg.waitForTimeout(1500);
   const kinds = await pg.evaluate(() => { const o = {}; Object.values(window.EB.Store.S.items).forEach(i => { if (!o[i.kind] && window.EB_BOTS.KINDS[i.kind]?.kit && i.status !== "rejected") o[i.kind] = i.id; }); return o; });
@@ -119,10 +121,70 @@ console.log("Inside Claude (all bots, kits)");
   await ctx.close();
 }
 
+console.log("Quality check, market data and listing photos");
+{
+  const { pg, ctx } = await page("local");
+  for (const id of ["product_factory", "wall_art", "worksheets", "notebooks"]) await runBot(pg, id);
+  const r = await pg.evaluate(async () => {
+    const S = window.EB.Store.S, Store = window.EB.Store, QA = window.EB_QA, W = window.EB_WIN, out = {};
+    const all = Object.values(S.items).filter(i => QA.SELL.includes(i.kind));
+    out.allChecked = all.every(i => i.qa && typeof i.qa.score === "number" && i.qa.visual);
+    out.noneRejected = all.filter(i => i.status === "rejected").map(i => i.title + ": " + i.qa.issues.map(x => x[1]).join(","));
+    out.minScore = Math.min(...all.map(i => i.qa.score));
+    // tags: too long gets shortened, trademarks dropped, duplicates removed
+    out.tags = QA.tidyTags(["Weekly Planner", "weekly planner", "printable weekly planner pages", "harry potter gift", "x"]);
+    // market: a niche with live data adds relevant top-seller tags only, and moves an out-of-range price
+    await Store.save("items", "niche-t", { id: "niche-t", kind: "niche", bot: "niche_research", status: "new", title: "teacher planner", createdAt: new Date().toISOString(), data: { keyword: "teacher planner", score: 70, type: "printable", etsy: { count: 5000, price: 4.2, p25: 3, p75: 6, tags: [["teacher gift", 30], ["dog mom", 25], ["teacher planner pages", 20], ["lesson planner", 15], ["hogwarts planner", 12]] } } });
+    const base = Object.values(S.items).find(i => i.kind === "printable");
+    await Store.save("items", "pr-t", { ...base, id: "pr-t", status: "pending", title: "Teacher Planner Bundle", createdAt: new Date().toISOString(), price: 12, qa: undefined, data: { ...base.data, title: "Teacher Planner Bundle, Lesson Plans and Class Schedule", tags: ["teacher planner", "class schedule", "lesson plan"], price: 12 } });
+    await QA.process([S.items["pr-t"]]);
+    const t = S.items["pr-t"]; out.market = { tags: t.data.tags, price: t.price, dataPrice: t.data.price, fixed: t.qa.fixed, market: !!t.qa.market };
+    // duplicates of earlier items are moved out of the Inbox; variations of an item are not
+    await Store.save("items", "dup-t", { ...t, id: "dup-t", status: "pending", createdAt: new Date(Date.now() + 1000).toISOString(), qa: undefined });
+    await QA.process([S.items["dup-t"]]); out.dup = [S.items["dup-t"].status, S.items["dup-t"].qa.issues.map(x => x[1]).join(",")];
+    const wa = Object.values(S.items).find(i => i.kind === "wallart" && i.status === "pending");
+    await W.variations(wa, 2); const vars = Object.values(S.items).filter(i => i.data.variantOf === wa.id);
+    await QA.process(vars); out.vars = vars.map(v => S.items[v.id].status);
+    // an empty design is caught by the image check
+    const K = window.EB_BOTS.KINDS, orig = K.wallart.thumb;
+    K.wallart.thumb = (it, w) => { const c = document.createElement("canvas"); c.width = w; c.height = w; const x = c.getContext("2d"); x.fillStyle = "#f3eee6"; x.fillRect(0, 0, w, w); return c; };
+    await Store.save("items", "blank-t", { ...wa, id: "blank-t", status: "pending", title: "Totally different abstract print", createdAt: new Date(Date.now() + 2000).toISOString(), qa: undefined, data: { ...wa.data, title: "Totally different abstract print", variantOf: undefined } });
+    await QA.process([S.items["blank-t"]]); K.wallart.thumb = orig;
+    out.blank = [S.items["blank-t"].status, S.items["blank-t"].qa.issues.map(x => x[1]).join(",")];
+    out.blankNotQueued = window.EB_AUTO.destination({ ...S.items["blank-t"], status: "approved" }) === "";
+    // photo sets: 4:3 photos for every Etsy kind, all drawable
+    out.photos = {};
+    for (const kind of ["printable", "wallart", "worksheet"]) {
+      const it = Object.values(S.items).find(i => i.kind === kind); const set = window.EB_SCENES.photoSet(it);
+      const dims = set.map(([, f]) => { const c = f(); const d = [c.width, c.height]; c.width = 0; return d; });
+      out.photos[kind] = { n: set.length, landscape: dims.filter(([w, h]) => w === 2000 && h === 1500).length, all: dims.every(([w, h]) => w >= 1600 && h >= 1200) };
+    }
+    out.assets = window.EB_AUTO.assets(Object.values(S.items).find(i => i.kind === "worksheet")).images.length;
+    out.sheet = (document.querySelector("[data-tab=inbox]").click(), await new Promise(r => setTimeout(r, 100)), !!document.querySelector(".card.item .qa"));
+    return out;
+  });
+  check("every new design gets a quality score and image check", r.allChecked);
+  check("good bot output is never rejected", !r.noneRejected.length && r.minScore >= 80, JSON.stringify(r.noneRejected) + " min " + r.minScore);
+  check("tags are cleaned: shortened, deduped, trademarks dropped", JSON.stringify(r.tags) === JSON.stringify(["weekly planner", "printable weekly"]), JSON.stringify(r.tags));
+  check("market data adds relevant top-seller tags, skips unrelated and trademarked ones", r.market.tags.includes("teacher gift") && r.market.tags.includes("lesson planner") && !r.market.tags.includes("dog mom") && !r.market.tags.some(t => /hogwarts/.test(t)), JSON.stringify(r.market.tags));
+  check("an out-of-range price moves into the market range", r.market.price === 3.99 && r.market.dataPrice === 3.99, JSON.stringify(r.market));
+  check("near-duplicates are moved out of the Inbox with the reason", r.dup[0] === "rejected" && /almost the same/.test(r.dup[1]), JSON.stringify(r.dup));
+  check("variations of an item are not treated as duplicates", r.vars.length === 2 && r.vars.every(s => s === "pending"), JSON.stringify(r.vars));
+  check("an empty design is caught and kept out of the publish queue", r.blank[0] === "rejected" && /empty/.test(r.blank[1]) && r.blankNotQueued, JSON.stringify(r.blank));
+  check("printables get 6+ listing photos", r.photos.printable.n >= 6 && r.photos.printable.all, JSON.stringify(r.photos.printable));
+  check("wall art gets 3 room scenes + sizes + details + close-up", r.photos.wallart.n === 7 && r.photos.wallart.landscape === 7, JSON.stringify(r.photos.wallart));
+  check("worksheets get 6+ listing photos for Etsy", r.photos.worksheet.n >= 6 && r.assets >= 6, JSON.stringify(r.photos.worksheet) + " assets " + r.assets);
+  check("quality score shows in the Inbox", r.sheet);
+  check("no page errors", pg.errors.length === 0, pg.errors.join(" | "));
+  await ctx.close();
+}
+
 console.log("Android (publishing to Etsy, Printify, Pinterest)");
 {
   const { pg, ctx } = await page("android");
   for (const id of ["niche_research", "calendar_bot", "pod_designs", "wall_art", "worksheets"]) { const run = await runBot(pg, id); check(`bot ${id} runs`, run && run.status === "ok", run ? run.summary : ""); }
+  const niche = await pg.evaluate(() => Object.values(window.EB.Store.S.items).find(i => i.kind === "niche" && i.data.etsy).data.etsy);
+  check("research reads the live market: price range, top tags, newcomers", niche.p25 > 0 && niche.p75 > niche.p25 && niche.tags.some(t => t[0] === "weekly planner") && niche.freshWin > 0 && niche.digitalShare === 80, JSON.stringify(niche).slice(0, 300));
   await pg.click("#nav [data-tab=inbox]"); await pg.evaluate(() => document.querySelector("[data-act=approve-all]").click()); await pg.waitForTimeout(800);
   check("approving does not upload unless upload-on-approve is on", await pg.evaluate(() => !window.__req.some(r => r[1].includes("/shops/77/listings") && r[0] === "POST")));
   await runBot(pg, "pin_bot");

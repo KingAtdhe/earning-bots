@@ -5,7 +5,7 @@
   const { BOTS, KINDS, PLATFORMS } = window.EB_BOTS;
   const M = window.EB_MEDIA;
   const S = Store.S, esc = U.esc;
-  const VERSION = "4.0";
+  const VERSION = "4.1";
 
   const ICONS = {
     home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
@@ -275,7 +275,7 @@
       ${botsWith.length > 1 ? `<div class="chips">${["all", ...botsWith].map(id => `<button class="chip ${ui.inboxBot === id ? "on" : ""}" data-inbox="${id}">${esc(id === "all" ? "All" : botById(id)?.title || id)}</button>`).join("")}</div>` : ""}
       ${allShown.length > 1 ? `<div class="btns spread"><button class="primary" data-act="approve-all">${ic("check")}Approve all ${allShown.length}</button><button class="ghost" data-act="reject-all">${ic("x")}Reject all</button></div>` : ""}
       ${shown.length ? `<div class="grid">${shown.map(it => `<article class="card item">
-          <button class="open" data-item="${esc(it.id)}">${itemVisual(it)}<div class="meta"><span class="kind">${esc(KINDS[it.kind]?.label || it.kind)}</span><b>${esc(it.title)}</b><span class="muted">${esc(KINDS[it.kind]?.summary?.(it) || "")}</span></div></button>
+          <button class="open" data-item="${esc(it.id)}">${itemVisual(it)}<div class="meta"><span class="kind">${esc(KINDS[it.kind]?.label || it.kind)}${window.EB_QA ? window.EB_QA.badge(it) : ""}</span><b>${esc(it.title)}</b><span class="muted">${esc(KINDS[it.kind]?.summary?.(it) || "")}</span></div></button>
           <div class="btns"><button class="primary" data-act="approve" data-id="${esc(it.id)}">${ic("check")}Approve</button><button class="ghost" data-act="reject" data-id="${esc(it.id)}" aria-label="Reject">${ic("x")}</button></div></article>`).join("")}</div>`
         : `<div class="emptystate">${ic("inbox")}<b>Nothing to review</b><span>New work from your bots lands here.</span><button class="primary" data-tab="bots">${ic("play")}Run a bot</button></div>`}
       ${allShown.length > shown.length ? `<button class="ghost wide" data-act="inbox-more">Show more (${allShown.length - shown.length} left)</button>` : ""}`;
@@ -336,7 +336,7 @@
     if (it.kind === "opportunity") body += `<dl class="facts">${[["Source", d.source], ["Company", d.company], ["Pay", d.salary], ["Location", d.location], ["Posted", d.date && new Date(d.date).toLocaleDateString()], ["Tags", (d.tags || []).join(", ")]].filter(f => f[1]).map(([a, v]) => `<dt>${a}</dt><dd>${esc(v)}</dd>`).join("")}</dl>${d.proposal ? `<h4>Your proposal</h4><pre>${esc(d.proposal)}</pre>` : ""}`;
     if (it.kind === "deal") body += `<dl class="facts"><dt>Price now</dt><dd>${U.fmt(Math.round(d.price * 100), d.currency)}</dd><dt>Your buy price</dt><dd>${U.fmt(Math.round(d.target * 100), d.currency)}</dd>${d.resell ? `<dt>Resale estimate</dt><dd>${U.fmt(Math.round(d.resell * 100), d.currency)} (profit about ${U.fmt(Math.round((d.resell - d.price) * 100), d.currency)})</dd>` : ""}</dl>`;
     if (it.kind === "niche") body += `<div class="kpis inline"><div><b>${d.score}</b><span>score / 100</span></div><div><b>${d.etsy ? d.etsy.count.toLocaleString() : d.estimated ? `${d.est.competition}/10` : "?"}</b><span>${d.etsy ? "Etsy listings" : "competition"}</span></div><div><b>${d.etsy ? d.etsy.fav : d.estimated ? `${d.est.demand}/10` : d.suggestHits}</b><span>${d.etsy ? "avg favorites" : "demand"}</span></div></div>
-      <dl class="facts"><dt>Make</dt><dd>${esc(window.EB_WIN.TYPES[d.type] || d.type)}</dd>${d.angle ? `<dt>Angle</dt><dd>${esc(d.angle)}</dd>` : ""}${d.etsy && d.etsy.price ? `<dt>Typical price</dt><dd>${d.etsy.price}</dd>` : ""}<dt>Data</dt><dd>${d.estimated ? "Claude's estimate (no live data here)" : "Google + Amazon suggestions" + (d.etsy ? ", Etsy search" : "")}</dd></dl>`;
+      <dl class="facts"><dt>Make</dt><dd>${esc(window.EB_WIN.TYPES[d.type] || d.type)}</dd>${d.angle ? `<dt>Angle</dt><dd>${esc(d.angle)}</dd>` : ""}${d.etsy && d.etsy.price ? `<dt>Typical price</dt><dd>${d.etsy.p25 ? `${d.etsy.p25}–${d.etsy.p75} (median ${d.etsy.price})` : d.etsy.price}${d.etsy.digitalShare != null ? ` · ${d.etsy.digitalShare}% digital` : ""}</dd>` : ""}${d.etsy && d.etsy.sample ? `<dt>Newcomers</dt><dd>${d.etsy.freshWin || 0} of the top ${d.etsy.sample} are under 4 months old with 10+ favorites${d.etsy.freshWin ? " (room for new shops)" : ""}</dd>` : ""}${d.etsy && (d.etsy.tags || []).length ? `<dt>Top sellers' tags</dt><dd>${esc(d.etsy.tags.slice(0, 15).map(t => t[0]).join(", "))}</dd>` : ""}<dt>Data</dt><dd>${d.estimated ? "Claude's estimate (no live data here)" : "Google + Amazon suggestions" + (d.etsy ? ", Etsy search" : "")}</dd></dl>`;
     if (it.kind === "article") body += `<p class="muted">Keyword: “${esc(d.keyword)}” · ${esc(d.meta)}</p><div class="article">${M.mdToHtml(d.markdown)}</div>`;
     if (it.kind === "puzzlebook") body += `<dl class="facts"><dt>Subtitle</dt><dd>${esc(d.subtitle)}</dd><dt>Puzzles</dt><dd>${d.count}, with solutions</dd><dt>Format</dt><dd>8.5 x 11 in paperback, large print</dd><dt>Price</dt><dd>${d.price.toFixed(2)} USD</dd></dl>`;
     if (["printable", "design", "puzzlebook", "content"].includes(it.kind)) {
@@ -362,7 +362,7 @@
     return `<div class="sheet-head"><span class="kindtag">${ic(k.icon)}${esc(k.label || it.kind)}</span><button class="iconbtn" data-act="close" aria-label="Close">${ic("x")}</button></div>
       <h2 class="sheet-title">${esc(it.title)}</h2>
       <p class="muted">${esc(statusLabel)} · by ${esc(b ? b.title : it.bot)} · ${U.ago(it.createdAt)}${it.price ? ` · ${Number(it.price).toFixed(2)}` : ""}</p>
-      ${pipeline}<div class="btns wrap">${window.EB_AUTO.itemActions(it)}${acts.join("")}${sold}</div>${body}${links}
+      ${pipeline}<div class="btns wrap">${window.EB_AUTO.itemActions(it)}${acts.join("")}${sold}</div>${window.EB_QA ? window.EB_QA.sheetHtml(it) : ""}${body}${links}
       <button class="danger-link" data-act="delete-item" data-id="${esc(it.id)}">${ic("trash")}Delete</button>`;
   }
 
@@ -633,7 +633,10 @@ Return JSON {"proposal": "..."}`);
   if (TABS.some(t => t[0] === start)) ui.tab = start;
   Store.onChange(render);
   render();
-  window.EB.startStorage().then(() => window.EB_CLOUD && window.EB_CLOUD.start());
+  window.EB.startStorage().then(() => {
+    if (window.EB_CLOUD) window.EB_CLOUD.start();
+    if (window.EB_QA) setTimeout(() => window.EB_QA.backfill().catch(() => {}), 2500); // image checks for anything not checked yet
+  });
   setInterval(autopilot, 5 * 60 * 1000);
   setTimeout(() => window.EB_AUTO.reminders(), 3000);
   setTimeout(autopilot, 20000);

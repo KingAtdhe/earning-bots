@@ -3,8 +3,10 @@
 // Inside Claude: fake Claude (sample) and connectors (mcp)
 export const claudeMode = () => {
   window.__calls = [];
-  const fake = async prompt => {
+  window.__seen = 0;
+  const fake = async (prompt, opts) => {
     await new Promise(r => setTimeout(r, 20));
+    if (opts && opts.images && opts.images.length) { window.__seen++; return { score: 6, issues: ["the subtitle is hard to read at thumbnail size"] }; }
     const ids = [...prompt.matchAll(/"id":"([^"]+)"/g)].map(m => m[1]);
     if (prompt.includes('{"ok": true}')) return { ok: true };
     if (prompt.includes("quality reviewer")) return ids.map((id, i) => ({ id, score: i % 3 === 2 ? 5 : 9, issue: i % 3 === 2 ? "Title too vague" : "" }));
@@ -24,7 +26,7 @@ export const claudeMode = () => {
     if (prompt.includes("cold outreach")) return [{ subject: "Website for Cafe Luna?", body: "Hi" }, { subject: "x", body: "y" }];
     return [];
   };
-  const sample = p => fake(p); sample.json = fake;
+  const sample = p => fake(p); sample.json = fake; sample.limits = async () => ({ images: true });
   const mcp = {
     callTool: async (server, tool, input) => { window.__calls.push([server, tool, input]); if (tool === "getBrandSettings") return { payload: { brands: [{ id: 123, label: "Brand", timezone: "Europe/Belgrade" }] } }; return { payload: { id: "d1", viewUrl: "https://mail.google.com/x" } }; },
     listTools: async () => ({ servers: [{ server: "Gmail", tools: [] }] }),
@@ -51,7 +53,10 @@ export const androidMode = () => {
     window.__req.push([opt.method || "GET", url.replace(/\?.*/, ""), body]);
     if (url.includes("suggestqueries")) { const q = decodeURIComponent(url.split("q=")[1]); return J([q, [q + " printable", q + " for women"]]); }
     if (url.includes("completion.amazon")) return J({ suggestions: [{ value: "teacher gift ideas" }] });
-    if (url.includes("/listings/active")) return J({ count: 12000, results: [{ num_favorers: 80, views: 900, price: { amount: 499, divisor: 100 } }] });
+    if (url.includes("/listings/active")) {
+      const now = Date.now() / 1000, tagSets = [["weekly planner", "planner printable", "undated planner", "harry potter"], ["weekly planner", "productivity", "to do list"], ["planner printable", "weekly planner", "a5 inserts"]];
+      return J({ count: 12000, results: Array.from({ length: 30 }, (_, i) => ({ num_favorers: 20 + i * 5, views: 900, listing_type: i % 5 ? "download" : "physical", original_creation_timestamp: now - (i < 6 ? 30 : 400) * 86400, price: { amount: 299 + i * 25, divisor: 100 }, tags: tagSets[i % 3] })) });
+    }
     if (url.includes("seller-taxonomy")) return J({ results: [{ id: 1, name: "Paper & Party Supplies", children: [{ id: 2, name: "Paper", children: [{ id: 2078, name: "Calendars & Planners", children: [] }] }] }, { id: 66, name: "Art & Collectibles", children: [{ id: 3000, name: "Prints", children: [{ id: 3001, name: "Digital Prints", children: [] }] }] }, { id: 70, name: "Books", children: [{ id: 4000, name: "Educational Worksheets", children: [] }] }] });
     if (/\/shops\/77\/listings$/.test(url.replace(/\?.*/, "")) && opt.method === "POST") return J({ listing_id: ++listingN });
     if (url.includes("/files") && opt.method === "POST" && window.__fail.files > 0) { window.__fail.files--; return J({ error: "Temporary upload problem" }, 400); }

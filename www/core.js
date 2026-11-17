@@ -206,6 +206,26 @@
       try { return await Claude._json(prompt); }
       catch (e) { if (/rate|limit|not_granted|API key|Settings/i.test(String(e.message || e.code))) throw e; await U.sleep(1500); return await Claude._json(prompt); }
     },
+    // looks at an image (a JPEG blob) and answers in JSON; null when this view can't see images
+    async canSee() {
+      if (sample) { try { return !!(sample.limits && (await sample.limits()).images); } catch { return false; } }
+      return !IN_CLAUDE && !!LS.get("eb_anthropic_key", "");
+    },
+    async vision(prompt, blob) {
+      if (!blob || !(await Claude.canSee())) return null;
+      if (sample) return await sample.json(prompt, { images: [blob], modelTier: "default" });
+      const data = await new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(",")[1]); fr.onerror = no; fr.readAsDataURL(blob); });
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": LS.get("eb_anthropic_key", ""), "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: LS.get("eb_model", "claude-sonnet-5-5"), max_tokens: 1500,
+          messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: blob.type || "image/jpeg", data } }, { type: "text", text: prompt + "\n\nReply with valid JSON only, no other text." }] }] }),
+      });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.error?.message || `Claude API error ${res.status}`);
+      const text = (out.content || []).map(c => c.text || "").join(""), i = text.search(/[[{]/), j = Math.max(text.lastIndexOf("]"), text.lastIndexOf("}"));
+      return JSON.parse(text.slice(i, j + 1));
+    },
     async _json(prompt) {
       if (sample) return await sample.json(prompt, { modelTier: "default" });
       const key = LS.get("eb_anthropic_key", "");

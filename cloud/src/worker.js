@@ -8,6 +8,7 @@ import "../../www/kdp.js";
 import "../../www/art.js";
 import "../../www/bots2.js";
 import "../../www/research.js";
+import "../../www/quality.js";
 
 const VERSION = "1.0";
 const COLS = ["items", "earnings", "runs", "watches", "config"];
@@ -95,17 +96,21 @@ async function runBot(env, bot) {
 }
 // same quality gate as the app: never publishes, only approves (publishing always needs a person)
 async function gate(bot, ids) {
-  const mode = Store.botConfig(bot.id).approve || "manual";
-  const pending = ids.map(id => S.items[id]).filter(i => i && i.status === "pending");
-  if (!pending.length || mode === "manual") return "";
+  // quality: text fixes, market tags and prices, duplicates (images are checked on the phone)
+  let qaNote = "";
+  try { const q = await globalThis.EB_QA.process(ids.map(id => S.items[id])); qaNote = [q.fixed ? `${q.fixed} improved` : "", q.rejected ? `${q.rejected} failed the quality check` : ""].filter(Boolean).join(", "); }
+  catch (e) { Log.add("warn", "Quality check: " + e.message); }
+  const QA = globalThis.EB_QA, mode = Store.botConfig(bot.id).approve || "manual";
+  const pending = ids.map(id => S.items[id]).filter(i => i && i.status === "pending" && (mode === "manual" || QA.passes(i, mode === "auto" ? "auto" : "review")));
+  if (!pending.length || mode === "manual") return qaNote;
   const PIPE = ["lead", "opportunity", "deal", "niche"];
   const ok = async it => Store.patch("items", it.id, { status: PIPE.includes(it.kind) ? "new" : "approved", approvedAt: new Date().toISOString(), autoApproved: true });
-  if (mode === "auto" || !Claude.available()) { for (const it of pending) await ok(it); return `${pending.length} auto-approved`; }
+  if (mode === "auto" || !Claude.available()) { for (const it of pending) await ok(it); return [`${pending.length} auto-approved`, qaNote].filter(Boolean).join(", "); }
   const r = await Claude.json(`You are a strict quality reviewer for a seller who lists digital products and content on marketplaces. Score each item 1-10 for: clear and accurate title, no spelling mistakes, no trademark or brand names, no misleading claims, sensible price, and whether buyers would want it. Items: ${JSON.stringify(pending.map(i => ({ id: i.id, kind: i.kind, title: i.data.title || i.title, description: String(i.data.description || i.data.caption || i.data.text || "").slice(0, 600), tags: i.data.tags || i.data.hashtags, price: i.price })))}
 Return a JSON array of {"id": "...", "score": number, "issue": "short reason if below 7, else empty"}.`);
   const scores = new Map((Array.isArray(r) ? r : []).map(x => [x.id, x])); let n = 0;
   for (const it of pending) { const s = scores.get(it.id); if (s && Number(s.score) >= 7) { await ok(it); n++; } else if (s) await Store.patch("items", it.id, { review: { score: Number(s.score) || 0, issue: String(s.issue || "").slice(0, 200) } }); }
-  return `${n} auto-approved${pending.length - n ? `, ${pending.length - n} held for you` : ""}`;
+  return [`${n} auto-approved${pending.length - n ? `, ${pending.length - n} held for you` : ""}`, qaNote].filter(Boolean).join(", ");
 }
 
 // ---- sales sync -------------------------------------------------------------------------------------------

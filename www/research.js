@@ -39,7 +39,8 @@
   async function variations(it, count = 3) {
     const base = { bot: it.bot, kind: it.kind, status: "pending", createdAt: U.now(), links: {} };
     const made = [];
-    const save = async (id, title, data, price) => { await Store.save("items", id, { ...base, id, title, data, price: price ?? it.price }); made.push(title); };
+    const root = it.data.variantOf || it.id; // variations are meant to look alike; the duplicate check knows them by this
+    const save = async (id, title, data, price) => { await Store.save("items", id, { ...base, id, title, data: { ...data, variantOf: root }, price: price ?? it.price }); made.push(title); };
     const d = it.data;
     if (it.kind === "printable") {
       for (const theme of U.shuffle(Object.keys(D.THEMES)).filter(t => t !== d.theme)) {
@@ -94,18 +95,68 @@
     try { const r = await Web.json(`https://completion.amazon.com/api/2017/suggestions?prefix=${encodeURIComponent(q)}&mid=ATVPDKIKX0DER&alias=aps&limit=10`); (r.suggestions || []).forEach(s => out.add(String(s.value).toLowerCase())); } catch { /* source down */ }
     return [...out];
   }
+  // Live Etsy market for a keyword: competition, buyer interest, real price range (digital listings
+  // when there are enough), the tags top sellers use, and whether new listings still win favorites.
+  const pr = x => x.price ? x.price.amount / x.price.divisor : 0;
+  const quant = (arr, q) => { if (!arr.length) return 0; const s = arr.slice().sort((a, b) => a - b); return Math.round(s[Math.min(s.length - 1, Math.floor(q * s.length))] * 100) / 100; };
   async function etsyStats(keyword) {
     const key = window.EB_AUTO && window.EB_AUTO.Etsy.key(); if (!key) return null;
-    const r = await Web.json(`https://api.etsy.com/v3/application/listings/active?keywords=${encodeURIComponent(keyword)}&limit=25&sort_on=score`, { "x-api-key": key });
-    const res = r.results || []; if (!res.length) return { count: r.count || 0, fav: 0, views: 0, price: 0 };
-    const avg = f => res.reduce((a, x) => a + (Number(x[f]) || 0), 0) / res.length;
-    return { count: r.count || 0, fav: Math.round(avg("num_favorers")), views: Math.round(avg("views")), price: Math.round(res.reduce((a, x) => a + (x.price ? x.price.amount / x.price.divisor : 0), 0) / res.length * 100) / 100 };
+    const r = await Web.json(`https://api.etsy.com/v3/application/listings/active?keywords=${encodeURIComponent(keyword)}&limit=100&sort_on=score`, { "x-api-key": key });
+    const res = (r.results || []).filter(x => x && typeof x === "object"); if (!res.length) return { count: r.count || 0, fav: 0, views: 0, price: 0, tags: [], sample: 0 };
+    const top = res.slice(0, 25), avg = f => Math.round(top.reduce((a, x) => a + (Number(x[f]) || 0), 0) / top.length);
+    const digital = res.filter(x => x.listing_type === "download" || x.is_digital === true);
+    const priced = (digital.length >= 5 ? digital : res).map(pr).filter(p => p > 0);
+    const freq = new Map();
+    for (const x of res) for (const t of new Set((x.tags || []).map(t => String(t).toLowerCase().trim()))) if (t && t.length <= 20) freq.set(t, (freq.get(t) || 0) + 1);
+    const now = Date.now() / 1000, fresh = res.filter(x => now - (Number(x.original_creation_timestamp || x.creation_timestamp) || 0) < 120 * 86400);
+    return { count: r.count || 0, fav: avg("num_favorers"), views: avg("views"), sample: res.length,
+      price: quant(priced, 0.5), p25: quant(priced, 0.25), p75: quant(priced, 0.75), digitalShare: Math.round(digital.length / res.length * 100),
+      tags: [...freq.entries()].filter(([, n]) => n >= 3).sort((a, b) => b[1] - a[1]).slice(0, 30),
+      fresh: fresh.length, freshWin: fresh.filter(x => (Number(x.num_favorers) || 0) >= 10).length, at: Date.now() };
   }
   function score(n) {
-    // demand: autocomplete presence + favorites/views of top listings; competition: number of active listings
-    const demand = (n.suggestHits || 0) * 8 + (n.etsy ? Math.min(60, n.etsy.fav) + Math.min(30, n.etsy.views / 50) : 0);
-    const comp = n.etsy ? Math.log10(Math.max(10, n.etsy.count)) : 3.5;
-    return Math.round(Math.max(1, Math.min(100, demand / comp * 3)));
+    // demand: autocomplete presence + favorites/views of top listings; competition: number of active listings;
+    // opportunity: listings under 4 months old that already have favorites (the market still rewards newcomers)
+    const e = n.etsy, demand = (n.suggestHits || 0) * 8 + (e ? Math.min(60, e.fav) + Math.min(30, e.views / 50) : 0);
+    const comp = e ? Math.log10(Math.max(10, e.count)) : 3.5, opp = e && e.sample ? Math.min(15, (e.freshWin || 0) / e.sample * 60) : 0;
+    return Math.round(Math.max(1, Math.min(100, demand / comp * 3 + opp)));
+  }
+
+  // ---- applying market data to an item: tags buyers search for, and a price in the going range ------
+  const TRADEMARKS = ["disney", "marvel", "pixar", "star wars", "harry potter", "hogwarts", "pokemon", "nintendo", "mario", "barbie", "nike", "adidas", "coca cola", "nfl", "nba", "mlb", "fifa", "taylor swift", "swiftie", "eras tour", "lego", "minecraft", "fortnite", "hello kitty", "sanrio", "bluey", "paw patrol", "peppa pig", "grinch", "snoopy", "peanuts", "friends tv", "stanley cup", "starbucks", "olympics", "super bowl", "march madness", "chanel", "louis vuitton", "gucci", "harley davidson", "jeep", "cricut", "goodnotes", "canva"];
+  const hasTrademark = t => TRADEMARKS.some(w => new RegExp(`\\b${w}\\b`).test(String(t).toLowerCase()));
+  const STOP = new Set("a an and the for of to with in on your my our is it this that printable digital download instant pdf template file files gift gifts".split(" "));
+  const words = s => (String(s).toLowerCase().match(/[a-z0-9']+/g) || []).filter(w => w.length > 2 && !STOP.has(w));
+  const ETSY_KINDS = ["printable", "wallart", "worksheet"];
+  function nicheFor(it) {
+    const d = it.data || {}, text = new Set(words(`${d.title || it.title} ${(d.tags || []).join(" ")} ${d.niche || d.keyword || ""}`));
+    let best = null;
+    for (const n of Object.values(S.items)) {
+      if (n.kind !== "niche" || !n.data.etsy || !(n.data.etsy.tags || []).length) continue;
+      const kw = words(n.data.keyword); if (!kw.length) continue;
+      const hit = kw.filter(w => text.has(w)).length / kw.length;
+      if (hit >= 0.67 && (!best || hit > best.hit || (hit === best.hit && n.data.score > best.n.data.score))) best = { n, hit };
+    }
+    return best && best.n;
+  }
+  function enrich(it) {
+    const d = it.data || {}; if (!Array.isArray(d.tags)) return null;
+    const n = nicheFor(it); if (!n) return null;
+    const m = n.data.etsy, kw = n.data.keyword, tags = d.tags.map(t => String(t).toLowerCase().trim()).filter(Boolean), added = [];
+    const near = new Set(words(`${d.title || it.title} ${tags.join(" ")} ${kw}`));
+    const cand = [kw, ...m.tags.map(([t]) => t)];
+    for (const t of cand) {
+      if (tags.length >= 13) break;
+      if (t.length > 20 || tags.includes(t) || hasTrademark(t) || !words(t).some(w => near.has(w))) continue;
+      tags.push(t); added.push(t);
+    }
+    const out = { tags, market: { keyword: kw, nicheId: n.id, median: m.price, p25: m.p25, p75: m.p75, tagsAdded: added, competition: m.count } };
+    const cur = Number(it.price || d.price) || 0;
+    if (ETSY_KINDS.includes(it.kind) && m.price > 0 && m.p25 > 0 && cur && (cur < m.p25 * 0.85 || cur > m.p75 * 1.15)) {
+      const target = Math.max(1.5, Math.min(39, Math.round(m.price) - 0.01 > 1 ? Math.round(m.price) - 0.01 : m.price));
+      out.price = Math.round(target * 100) / 100; out.market.priceFrom = cur;
+    }
+    return out;
   }
 
   BOTS.splice(0, 0, {
@@ -188,5 +239,5 @@ Return a JSON array of {"keyword": search phrase buyers type, "type": one of ${O
     summary: it => `Score ${it.data.score}/100 · ${TYPES[it.data.type] || it.data.type}${it.data.etsy ? ` · ${it.data.etsy.count.toLocaleString()} on Etsy` : it.data.estimated ? " · estimate" : ""}`,
   };
 
-  window.EB_WIN = { seasonalSeeds, itemScore, prefer, weightedPick, winners, variations, useNiche, TYPES };
+  window.EB_WIN = { TRADEMARKS, hasTrademark, words, nicheFor, enrich, etsyStats, seasonalSeeds, itemScore, prefer, weightedPick, winners, variations, useNiche, TYPES };
 })();

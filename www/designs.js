@@ -511,7 +511,15 @@ PLEASE NOTE
     return cv;
   }
 
+  // just the white page (A4 proportions), for placing into photo scenes
+  function pageOnly(product, key, width = 1100) {
+    const size = SIZES.A4, k = width / size[0], cv = document.createElement("canvas"); cv.width = width; cv.height = Math.round(size[1] * k);
+    const ctx = cv.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
+    drawShapes(ctx, buildPage(key, "A4", product.theme).shapes, k, 0, 0);
+    return cv;
+  }
+
   const canvasBlob = (cv, type = "image/png", q) => new Promise(res => cv.toBlob(res, type, q));
 
-  window.EB_DESIGNS = { ensureCalendars, MONTHS, SIZES, THEMES, LAYOUTS, BUNDLES, listingCopy, cleanTags, makePdf, coverCanvas, pageCanvas, canvasBlob };
+  window.EB_DESIGNS = { ensureCalendars, MONTHS, SIZES, THEMES, LAYOUTS, BUNDLES, listingCopy, cleanTags, makePdf, coverCanvas, pageCanvas, pageOnly, canvasBlob };
 })();

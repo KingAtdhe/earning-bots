@@ -39,10 +39,17 @@
       }
       if (n) notes.push(`${n} email draft${n > 1 ? "s" : ""} waiting in Gmail`);
     }
-    const mode = approveMode(bot.id), pending = fresh.filter(i => i.status === "pending");
+    if (window.EB_QA) {
+      try {
+        const q = await window.EB_QA.process(fresh);
+        if (q.fixed) notes.push(`${q.fixed} improved automatically`);
+        if (q.rejected) notes.push(`${q.rejected} failed the quality check`);
+      } catch (e) { Log.add("warn", "Quality check: " + e.message); }
+    }
+    const QA = window.EB_QA, mode = approveMode(bot.id), pending = ids.map(id => S.items[id]).filter(i => i && i.status === "pending");
     if (!pending.length || mode === "manual") return notes.join(". ");
     let approved = [];
-    if (mode === "auto" || !Claude.available()) approved = pending;
+    if (mode === "auto" || !Claude.available()) approved = pending.filter(i => !QA || QA.passes(i, mode === "auto" ? "auto" : "review"));
     else {
       try {
         const r = await Claude.json(`You are a strict quality reviewer for a seller who lists digital products and content on marketplaces. Score each item 1-10 for: clear and accurate title, no spelling mistakes, no trademark or brand names, no misleading claims, sensible price, and whether buyers would want it. Items: ${JSON.stringify(pending.map(i => ({ id: i.id, kind: i.kind, title: i.data.title || i.title, description: String(i.data.description || i.data.caption || i.data.text || i.data.markdown || "").slice(0, 600), tags: i.data.tags || i.data.hashtags, price: i.price })))}
@@ -50,13 +57,14 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
         const scores = new Map((Array.isArray(r) ? r : []).map(x => [x.id, x]));
         for (const it of pending) {
           const s = scores.get(it.id);
-          if (s && Number(s.score) >= 7) approved.push(it);
+          if (s && Number(s.score) >= 7 && (!QA || QA.passes(it, "review"))) approved.push(it);
           else if (s) await Store.patch("items", it.id, { review: { score: Number(s.score) || 0, issue: U.clampStr(s.issue, 200) } });
         }
         if (pending.length - approved.length) notes.push(`${pending.length - approved.length} held back for you to check`);
       } catch (e) { notes.push("Review skipped: " + e.message); }
     }
     for (const it of approved) await approve(it, true, false);
+    if ((mode === "auto" || !Claude.available()) && pending.length > approved.length) notes.push(`${pending.length - approved.length} held back (quality score too low)`);
     if (approved.length) notes.unshift(`${approved.length} auto-approved`);
     return notes.join(". ");
   }
@@ -78,6 +86,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     const C = window.EB_CONNECT;
     if (it && it.publishBlocked) return "";
     if (!ignoreValidation && it && it.status === "approved" && validate(it).length) return "";
+    if (!ignoreValidation && it && window.EB_QA && window.EB_QA.blocked(it)) return "";
     if (!it || it.status === "listed" || it.status === "pending" || it.status === "rejected") return "";
     if (Etsy.canPublish(it)) return "Etsy";
     if (it.kind === "design" && C.Printify.ready() && !(it.links || {}).Printify) return "Printify";
@@ -282,22 +291,20 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
   // lazy renderers: each photo or file is drawn only when it is uploaded, then freed
   function release(cv) { try { cv.width = 0; cv.height = 0; } catch { /* ignore */ } }
   function assets(it) {
-    const d = it.data, images = [], files = [];
+    const d = it.data, files = [], images = window.EB_SCENES ? window.EB_SCENES.photoSet(it).slice(0, 10).map(([, draw]) => draw) : [];
     if (it.kind === "printable") {
       const p = { bundle: d.bundle, theme: d.theme, shortName: d.shortName, title: d.title };
-      images.push(() => D.coverCanvas(p, 2000)); d.bundle.pages.slice(0, 9).forEach(k => images.push(() => D.pageCanvas(p, k, 2000)));
       for (const size of Object.keys(D.SIZES)) { files.push([`${U.slug(d.shortName)}-${size}.pdf`, async () => D.makePdf(p, size)]); files.push([`${U.slug(d.shortName)}-${size}-low-ink.pdf`, async () => D.makePdf(p, size, true)]); }
     } else if (it.kind === "wallart") {
-      images.push(() => A.roomMockup(it, 2000), () => A.artCanvas(it, "2x3", 2000));
       for (const [key] of A.SIZES) files.push([`${U.slug(d.title).slice(0, 40)}-${key}.jpg`, async () => { const cv = A.artCanvas(it, key, maxArt()); const b = await Files.canvasBlob(cv, "image/jpeg", 0.93); release(cv); return b; }]);
-    } else if (it.kind === "worksheet") { images.push(() => K.cover(it, 2000)); files.push([`${U.slug(d.title)}.pdf`, async () => K.interior(it)]); }
+    } else if (it.kind === "worksheet") { files.push([`${U.slug(d.title)}.pdf`, async () => K.interior(it)]); }
     return { images, files };
   }
   // phones with little memory get smaller (still print-quality at 150+ dpi) wall art files
   function maxArt() { const m = navigator.deviceMemory || 8; return m <= 3 ? 3000 : m <= 4 ? 3600 : 4500; }
 
   // ---- listing validator: blocks uploads that marketplaces would reject or flag ---------------------
-  const TRADEMARKS = ["disney", "marvel", "pixar", "star wars", "harry potter", "hogwarts", "pokemon", "nintendo", "mario", "barbie", "nike", "adidas", "coca cola", "nfl", "nba", "mlb", "fifa", "taylor swift", "swiftie", "eras tour", "lego", "minecraft", "fortnite", "hello kitty", "sanrio", "bluey", "paw patrol", "peppa pig", "grinch", "snoopy", "peanuts", "friends tv", "stanley cup", "starbucks", "olympics", "super bowl", "march madness", "chanel", "louis vuitton", "gucci", "harley davidson", "jeep"];
+  const TRADEMARKS = window.EB_WIN.TRADEMARKS;
   function validate(it) {
     const d = it.data || {}, issues = [], title = String(d.title || it.title || ""), text = `${title} ${(d.tags || []).join(" ")} ${d.description || ""} ${(d.lines || []).join(" ")} ${d.quote || ""}`.toLowerCase();
     if (title.length < 10) issues.push("title is too short");
@@ -358,7 +365,8 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
   function settingsSection() {
     const a = auto(), m = a.metricool, tok = LS.get("eb_etsy_token", null);
     let h = `<h4>Automation</h4><form class="autoform">
-      <label class="check"><input type="checkbox" name="salesSync" ${a.salesSync ? "checked" : ""}> Sync sales automatically every 6 hours${IS_NATIVE ? "" : " (Android app)"}</label>`;
+      <label class="check"><input type="checkbox" name="salesSync" ${a.salesSync ? "checked" : ""}> Sync sales automatically every 6 hours${IS_NATIVE ? "" : " (Android app)"}</label>
+      <label class="check"><input type="checkbox" name="aiPhotoCheck" ${a.aiPhotoCheck !== false ? "checked" : ""}> Claude looks at each new design's main photo (up to 6 per run)</label>`;
     if (IS_NATIVE) h += `<label class="check"><input type="checkbox" name="etsyPublish" ${a.etsyPublish ? "checked" : ""}> When I approve a product, upload it right away (Etsy, Printify, Pinterest)</label>
       <label class="check"><input type="checkbox" name="etsyActivate" ${a.etsyActivate !== false ? "checked" : ""}> Make Etsy listings live right away (USD 0.20 each), otherwise save as drafts</label>`;
     if (IN_CLAUDE) h += `<label class="check"><input type="checkbox" name="gmailDrafts" ${a.gmailDrafts ? "checked" : ""}> Put Client Finder pitches in Gmail as drafts (never sent automatically)</label>`;
@@ -417,7 +425,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
   }
   async function handleSubmit(f, fd) {
     if (f.classList.contains("autoform")) {
-      await setAuto({ salesSync: fd.has("salesSync"), ...(IS_NATIVE ? { etsyPublish: fd.has("etsyPublish"), etsyActivate: fd.has("etsyActivate") } : {}), ...(IN_CLAUDE ? { gmailDrafts: fd.has("gmailDrafts") } : {}) });
+      await setAuto({ salesSync: fd.has("salesSync"), aiPhotoCheck: fd.has("aiPhotoCheck"), ...(IS_NATIVE ? { etsyPublish: fd.has("etsyPublish"), etsyActivate: fd.has("etsyActivate") } : {}), ...(IN_CLAUDE ? { gmailDrafts: fd.has("gmailDrafts") } : {}) });
       toast("Automation saved"); return true;
     }
     if (f.classList.contains("tokenform")) { LS.set(f.dataset.key, String(fd.get("token")).trim()); toast("Token saved"); return true; }
