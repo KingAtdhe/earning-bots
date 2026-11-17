@@ -154,9 +154,14 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     async api(method, path, body, isForm) {
       const t = await Etsy.token(), headers = { "x-api-key": Etsy.key(), Authorization: `Bearer ${t.access_token}` };
       if (body && !isForm) headers["Content-Type"] = "application/x-www-form-urlencoded";
-      const res = await fetch(ETSY_API + path, { method, headers, body: body ? (isForm ? body : new URLSearchParams(body).toString()) : undefined });
-      const txt = await res.text(); if (!res.ok) throw new Error(`Etsy ${res.status}: ${txt.slice(0, 200)}`);
-      return txt ? JSON.parse(txt) : {};
+      for (let attempt = 0; ; attempt++) {
+        const res = await fetch(ETSY_API + path, { method, headers, body: body ? (isForm ? body : new URLSearchParams(body).toString()) : undefined });
+        const txt = await res.text();
+        if (res.ok) return txt ? JSON.parse(txt) : {};
+        if ((res.status === 429 || res.status >= 500) && attempt < 2 && (method === "GET" || res.status === 429)) { await U.sleep(1500 * (attempt + 1)); continue; }
+        let msg = txt.slice(0, 200); try { msg = JSON.parse(txt).error || msg; } catch { /* plain text */ }
+        throw new Error(`Etsy ${res.status}: ${msg}`);
+      }
     },
     async taxonomy(kind) {
       const cache = LS.get("eb_etsy_tax", {}); if (cache[kind]) return cache[kind];
@@ -199,6 +204,14 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
         }
         if ((r.results || []).length < 100) break;
       }
+      // views and favorites for every listing the bots made, so winners can be found
+      try {
+        for (let offset = 0; offset < 1000; offset += 100) {
+          const r = await Etsy.api("GET", `/shops/${t.shop_id}/listings?state=active&limit=100&offset=${offset}`);
+          for (const l of r.results || []) { const it = byListing[String(l.listing_id)]; if (it) await Store.patch("items", it.id, { data: { ...S.items[it.id].data, stats: { views: l.views || 0, favorites: l.num_favorers || 0, at: U.now() } } }); }
+          if ((r.results || []).length < 100) break;
+        }
+      } catch { /* stats are a bonus */ }
       return added;
     },
   };
@@ -215,15 +228,17 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
   }
 
   // ---- full autopilot preset ---------------------------------------------------------------------
-  const PRESET = { "Make & sell": 24, "Content": 12, "Clients & jobs": 8, "Deals": 6 };
+  const PRESET = { "Research": 72, "Make & sell": 24, "Content": 12, "Clients & jobs": 8, "Deals": 6 };
   async function enableAutopilot(on) {
     const bots = { ...(cfg().bots || {}) };
     for (const b of BOTS) {
       const runnable = !((b.needs || []).includes("claude") && !Claude.available()) && !((b.needs || []).includes("web") && !Web.available());
-      bots[b.id] = { ...(bots[b.id] || {}), auto: on && runnable ? PRESET[b.category] || 24 : 0, approve: on ? (Claude.available() ? "review" : "manual") : (bots[b.id] || {}).approve || "manual" };
+      const off = (bots[b.id] || {}).disabled;
+      bots[b.id] = { ...(bots[b.id] || {}), auto: on && runnable && !off ? PRESET[b.category] || 24 : 0, approve: on ? (Claude.available() ? "review" : "manual") : (bots[b.id] || {}).approve || "manual" };
     }
     await Store.setConfig({ bots, auto: { ...auto(), autopilot: on, salesSync: on ? true : auto().salesSync, etsyPublish: on && Etsy.connected() ? true : auto().etsyPublish } });
     toast(on ? "Autopilot on: bots run on their own while the app is open" : "Autopilot off");
+    reminders();
   }
 
   // ---- UI pieces ----------------------------------------------------------------------------------------
@@ -301,6 +316,34 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     return out.join("");
   }
 
+  async function diagnostics() {
+    const out = [];
+    const check = async (name, fn) => { const t0 = Date.now(); try { const r = await fn(); out.push([name, true, r || `OK (${Date.now() - t0} ms)`]); } catch (e) { out.push([name, false, e.message || String(e)]); } };
+    out.push(["Running as", true, IN_CLAUDE ? "Inside Claude" : IS_NATIVE ? "Android app" : "Web browser"]);
+    await check("Saving data", async () => { await Store.setConfig({ diagAt: U.now() }); return S.mode === "claude" ? "Artifact database" : "This device"; });
+    await check("Claude", async () => { if (!Claude.available()) throw new Error(Claude.why()); const r = await Claude.json('Reply with the JSON {"ok": true}'); if (!r || !r.ok) throw new Error("Unexpected answer"); });
+    await check("Files (download / share)", async () => { if (!window.jspdf || !window.JSZip) throw new Error("PDF or ZIP library missing"); return "Ready"; });
+    if (IS_NATIVE) {
+      await check("Web access", async () => { await Web.text("https://api.github.com/zen"); });
+      await check("Etsy", async () => { if (!Etsy.connected()) throw new Error("Not connected (Settings)"); const t = await Etsy.token(); await Etsy.api("GET", `/shops/${t.shop_id}`); return `Connected to ${t.shop_name}`; });
+      await check("Gumroad", async () => { const k = LS.get("eb_gumroad", ""); if (!k) throw new Error("No token (Settings)"); await Web.json(`https://api.gumroad.com/v2/user?access_token=${encodeURIComponent(k)}`); });
+    }
+    if (IN_CLAUDE) {
+      await check("Gmail", async () => { if (!mcp) throw new Error("Connected apps unavailable here"); const l = await mcp.listTools(GMAIL); if (!l.servers.length) throw new Error("Add Gmail in claude.ai Settings > Connectors"); return "Available"; });
+      await check("Metricool", async () => { if (!auto().metricool) throw new Error("Pick a brand in Settings"); return auto().metricool.label; });
+    }
+    return out;
+  }
+  async function reminders() {
+    const P = window.Capacitor && window.Capacitor.Plugins, N = P && P.LocalNotifications; if (!IS_NATIVE || !N) return;
+    try {
+      await N.cancel({ notifications: [{ id: 101 }] });
+      if (!auto().autopilot) return;
+      const perm = await N.requestPermissions(); if (perm.display !== "granted") return;
+      await N.schedule({ notifications: [{ id: 101, title: "Your bots are ready", body: "Open Earning Bots so autopilot can make today's products and sync sales.", schedule: { on: { hour: 9, minute: 0 }, allowWhileIdle: true } }] });
+    } catch { /* reminders are optional */ }
+  }
+
   setTimeout(() => Etsy.finish(), 1500);
-  window.EB_AUTO = { afterRun, approve, periodic, syncSales, approveField, homeCard, settingsSection, handleAct, handleSubmit, itemActions, Etsy, Metricool };
+  window.EB_AUTO = { diagnostics, reminders, afterRun, approve, periodic, syncSales, approveField, homeCard, settingsSection, handleAct, handleSubmit, itemActions, Etsy, Metricool };
 })();

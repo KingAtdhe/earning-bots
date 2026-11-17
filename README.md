@@ -1,4 +1,4 @@
-# Earning Bots 3.0
+# Earning Bots 3.1
 
 Worker bots that make things you can sell or turn into paid work, an approval inbox, a library of
 everything they made, and an earnings dashboard. The same app runs inside Claude and on Android.
@@ -7,6 +7,7 @@ everything they made, and an earnings dashboard. The same app runs inside Claude
 
 | Bot | What it makes | Earns via | Needs |
 |---|---|---|---|
+| Niche Research Bot | Scores product niches: demand (Google + Amazon suggestions, Etsy favorites) vs competition (Etsy listing count), then feeds the best ones to the other bots | Better products | Android app for live data; inside Claude it gives labelled estimates |
 | Product Factory | Printable planner PDFs (A4 + US Letter), Etsy photos, listing | Etsy, Gumroad | nothing |
 | Idea Bot | Niche printable bundles (teachers, nurses, weddings...) | Etsy, Gumroad | Claude |
 | Puzzle Book Bot | Large-print Sudoku / Word Search books with solutions, cover, KDP listing | Amazon KDP | nothing (Claude optional for fresh themes) |
@@ -27,6 +28,17 @@ everything they made, and an earnings dashboard. The same app runs inside Claude
 | Newsletter Bot | Weekly newsletter issue | Sponsors, paid subs | Claude |
 | Social Text Bot | Text posts for X, Threads, LinkedIn, Bluesky; auto-schedules in Metricool (inside Claude) | Audience growth | Claude |
 | Gig Writer | Fiverr / Upwork service listings | Freelance work | Claude |
+
+## Focus on what sells
+- Etsy sync pulls views and favorites for every listing the bots made. Together with sales this ranks your **winners** (Home).
+- Product Factory, Wall Art, Shirt and Notebook bots lean towards the bundles, styles, niches and themes of your winners.
+- **More like this / Make 3 variations** creates new colourways, styles or volumes of any product.
+
+## Reliability
+- Claude calls retry once; Etsy calls retry on rate limits and server errors.
+- **Needs attention** (Home) lists failed runs and failed publishes with Retry buttons.
+- **Diagnostics** (Settings) checks Claude, storage, files, web, Etsy, Gumroad, Gmail and Metricool.
+- Bots can be switched off; Autopilot and Run all skip them. Android sends a daily 9:00 reminder while Autopilot is on.
 
 ## Automation
 - **Autopilot** (Home): schedules every bot that can run, turns on Claude quality review and sales sync. Runs while the app is open.

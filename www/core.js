@@ -122,6 +122,11 @@
     available() { return !!sample || (!IN_CLAUDE && !!LS.get("eb_anthropic_key", "")); },
     why() { return IN_CLAUDE ? "Claude isn't available in this view." : "Add your Anthropic API key in Settings."; },
     async json(prompt) {
+      // one retry on a malformed answer or a temporary error
+      try { return await Claude._json(prompt); }
+      catch (e) { if (/rate|limit|not_granted|API key|Settings/i.test(String(e.message || e.code))) throw e; await U.sleep(1500); return await Claude._json(prompt); }
+    },
+    async _json(prompt) {
       if (sample) return await sample.json(prompt, { modelTier: "default" });
       const key = LS.get("eb_anthropic_key", "");
       if (!key) throw new Error("Add your Anthropic API key in Settings to use this bot.");

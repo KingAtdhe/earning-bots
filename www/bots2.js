@@ -150,10 +150,13 @@
     } });
   add({ id: "notebooks", after: "coloring_books", title: "Notebook Bot", icon: "notebook", category: "Make & sell", earnsVia: "Amazon KDP",
     desc: "Makes themed 6 x 9 notebooks and journals (lined, dot grid, graph) with covers aimed at gift niches.", needs: [],
-    settings: [{ key: "perRun", label: "Notebooks per run", type: "number", def: 3, min: 1, max: 10 }, { key: "author", label: "Author / pen name", type: "text", def: "" }],
+    settings: [{ key: "perRun", label: "Notebooks per run", type: "number", def: 3, min: 1, max: 10 }, { key: "themes", label: "Extra themes (from research)", type: "text", def: "", placeholder: "e.g. Pickleball, Midwife" }, { key: "author", label: "Author / pen name", type: "text", def: "" }],
     async run(ctx) {
       const have = new Set(itemsOf("kdpbook").filter(i => i.data.type === "notebook").map(i => i.data.theme + i.data.style)); let made = 0;
-      for (const [theme] of U.shuffle(NOTEBOOK_THEMES)) {
+      const extra = String(ctx.cfg.themes || "").split(",").map(s => s.trim().replace(/\b\w/g, c => c.toUpperCase())).filter(Boolean).map(t => [t, t]);
+      const win = window.EB_WIN.prefer("kdpbook", it => it.data.theme);
+      const order = [...extra, ...U.shuffle(NOTEBOOK_THEMES).sort((a, b) => (win[b[0]] || 0) - (win[a[0]] || 0))];
+      for (const [theme] of order) {
         if (made >= ctx.cfg.perRun) break;
         const style = U.pick(["lined", "dot", "graph", "journal"]); if (have.has(theme + style)) continue;
         const data = { type: "notebook", theme, style, pages: 120, seed: Math.floor(Math.random() * 1e9), pattern: Math.floor(Math.random() * 3), palette: Math.floor(Math.random() * 9), author: ctx.cfg.author, ...notebookCopy(theme, style, 120) };
@@ -177,21 +180,22 @@
     } });
   add({ id: "wall_art", after: "pod_designs", title: "Wall Art Bot", icon: "image", category: "Make & sell", earnsVia: "Etsy printable wall art",
     desc: "Generates printable wall art (boho arches, suns, Bauhaus, abstract shapes, quote prints) in 5 frame sizes with a room mockup.", needs: [], uses: ["claude"],
-    settings: [{ key: "perRun", label: "Prints per run", type: "number", def: 3, min: 1, max: 8 }],
+    settings: [{ key: "perRun", label: "Prints per run", type: "number", def: 3, min: 1, max: 8 }, { key: "focus", label: "Rooms or themes to target (from research)", type: "text", def: "", placeholder: "e.g. nursery, bathroom, kitchen" }],
     async run(ctx) {
       let quotes = [];
+      const focus = String(ctx.cfg.focus || "").split(",").map(s => s.trim()).filter(Boolean), styleWin = window.EB_WIN.prefer("wallart", "style");
       if (Claude.available()) {
-        try { quotes = await Claude.json(`Write 8 short, original, uplifting quotes for printable wall art (4 to 10 words each, no famous quotes, no names). Return a JSON array of strings.`); } catch { quotes = []; }
+        try { quotes = await Claude.json(`Write 8 short, original, uplifting quotes for printable wall art${focus.length ? ` for these rooms or themes: ${focus.join(", ")}` : ""} (4 to 10 words each, no famous quotes, no names). Return a JSON array of strings.`); } catch { quotes = []; }
       }
       if (!Array.isArray(quotes) || !quotes.length) quotes = ["You are exactly where you need to be", "Slow mornings and big dreams", "Grow through what you go through", "Home is wherever we are together", "Make today a little brighter", "Breathe in courage, breathe out doubt"];
       const made = [];
       for (let i = 0; i < ctx.cfg.perRun; i++) {
-        const style = U.pick(A.STYLES), palette = Math.floor(Math.random() * A.ART_PALETTES.length), pal = A.ART_PALETTES[palette].name;
+        const style = window.EB_WIN.weightedPick(A.STYLES, styleWin), palette = Math.floor(Math.random() * A.ART_PALETTES.length), pal = A.ART_PALETTES[palette].name;
         const quote = style === "quote" ? String(U.pick(quotes)).slice(0, 90) : "";
         const name = style === "quote" ? `"${quote}" Quote Print` : `${{ arches: "Boho Rainbow Arches", sun: "Boho Sun", bauhaus: "Bauhaus Geometric", blobs: "Abstract Organic Shapes" }[style]} Print`;
         const data = { style, palette, seed: Math.floor(Math.random() * 1e9), quote, caption: style === "quote" ? "" : U.pick(["", "", "stay wild", "golden hour", "here comes the sun", "slow living"]),
-          title: `${name}, ${pal} Printable Wall Art, Mid Century Boho Decor, Digital Download`.slice(0, 140),
-          tags: ["printable wall art", "boho wall art", "digital download", `${style === "quote" ? "quote print" : style + " print"}`, "living room decor", "bedroom wall art", "mid century modern", `${pal.toLowerCase()} decor`, "abstract art print", "minimalist print", "gallery wall", "neutral wall art", "large wall art"].map(t => t.slice(0, 20)),
+          title: `${name}, ${pal} ${focus.length ? focus[i % focus.length].replace(/\b\w/g, c => c.toUpperCase()) + " " : ""}Printable Wall Art, Mid Century Boho Decor, Digital Download`.slice(0, 140),
+          tags: [...(focus.length ? [String(focus[i % focus.length]).toLowerCase().slice(0, 20)] : []), "printable wall art", "boho wall art", "digital download", `${style === "quote" ? "quote print" : style + " print"}`, "living room decor", "bedroom wall art", "mid century modern", `${pal.toLowerCase()} decor`, "abstract art print", "minimalist print", "gallery wall", "neutral wall art", "large wall art"].map(t => t.slice(0, 20)).slice(0, 13),
           description: `Refresh your walls in minutes. This ${style === "quote" ? "quote" : "abstract"} print comes in a ${pal.toLowerCase()} palette that works with modern and boho rooms.\n\nYOU GET 5 HIGH-RESOLUTION JPG FILES\n${A.SIZES.map(s => `- ${s[0]} ratio: ${s[3]}`).join("\n")}\n\nPrint at home, at a local print shop or with an online service. This is a digital download; no physical item will be shipped.`, price: 4.9 };
         await ctx.add("wallart", data.title, data, { price: data.price }); made.push(name);
       }

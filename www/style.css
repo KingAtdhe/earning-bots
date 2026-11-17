@@ -212,3 +212,14 @@ label.check input { width: 20px; height: 20px; margin: 1px 0 0; flex: none; acce
 .list.mini .row { padding: 9px 12px; } .list.mini .row span { white-space: normal; }
 .errtext { color: var(--err) !important; }
 .thumb.wallart, .thumb.kdpbook, .thumb.worksheet, .thumb.ebook, .thumb.pin { object-position: top; }
+.setup .ph b { font-size: 16px; } .setup .track { margin: 10px 0 4px; }
+.setup .list { padding: 0; margin: 0 -16px -12px; } .setup .row:disabled { opacity: 1; } .setup .row:disabled b { color: var(--muted); text-decoration: line-through; }
+.checkmark { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; flex: none; }
+.checkmark.on { background: var(--ok); border-color: var(--ok); color: #fff; } .checkmark.bad { background: var(--err); border-color: var(--err); color: #fff; }
+.checkmark .i { width: 14px; height: 14px; stroke-width: 3; }
+.tile.err { background: var(--err-soft); color: var(--err) !important; }
+.problems .row button.ghost, .list .row button.ghost { flex: none; padding: 8px 10px; font-size: 13px; }
+.linkish { background: none; padding: 0; text-align: left; flex-direction: column; align-items: flex-start; flex: 1; min-width: 0; font-weight: 400; }
+.ph { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.list .row .checkmark.on, .list .row .checkmark.bad { color: #fff; display: grid; }
+.list .row .checkmark { display: grid; }

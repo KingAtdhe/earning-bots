@@ -5,7 +5,7 @@
   const { BOTS, KINDS, PLATFORMS } = window.EB_BOTS;
   const M = window.EB_MEDIA;
   const S = Store.S, esc = U.esc;
-  const VERSION = "3.0";
+  const VERSION = "3.1";
 
   const ICONS = {
     home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
@@ -46,6 +46,7 @@
     if ((bot.needs || []).includes("web") && !Web.available()) return Web.why();
     return "";
   }
+  const isOff = b => !!Store.botConfig(b.id).disabled;
   function botCfg(bot) {
     const out = {};
     (bot.settings || []).forEach(s => { out[s.key] = s.def; });
@@ -114,7 +115,7 @@
     render();
   }
   async function runAll() {
-    const ready = BOTS.filter(b => !missingNeeds(b) && !(b.watches && !Object.keys(S.watches).length));
+    const ready = BOTS.filter(b => !isOff(b) && !missingNeeds(b) && !(b.watches && !Object.keys(S.watches).length));
     if (!ready.length) return toast("No bot can run here yet. Check Settings.", "error");
     toast(`Running ${ready.length} bots...`);
     for (const b of ready) await runBot(b, true);
@@ -122,7 +123,7 @@
   // autopilot: while the app is open, run bots whose interval has passed
   function autopilot() {
     for (const b of BOTS) {
-      const hours = parseFloat(Store.botConfig(b.id).auto || 0); if (!hours || ui.running[b.id] || missingNeeds(b)) continue;
+      const hours = parseFloat(Store.botConfig(b.id).auto || 0); if (!hours || isOff(b) || ui.running[b.id] || missingNeeds(b)) continue;
       const last = lastRun(b.id); if (last && Date.now() - Date.parse(last.startedAt) < hours * 3600e3) continue;
       runBot(b, true); break;
     }
@@ -191,18 +192,51 @@
         <button class="stat" data-go="library:listed"><b>${listed.length}</b><span>Live</span></button>
         <button class="stat" data-go="library:leads"><b>${leads.length}</b><span>Leads & jobs</span></button>
       </div>
-      ${window.EB_AUTO.homeCard()}
+      ${setupCard()}${window.EB_AUTO.homeCard()}${problemsCard()}${winnersCard()}
       <button class="primary wide" data-act="run-all">${ic("bolt")} ${running.length ? `Running ${running.length} bot${running.length > 1 ? "s" : ""}...` : "Run all bots"}</button>
       ${steps.length ? `<h2>Next steps</h2><div class="card list">${steps.map(([go, t, s]) => `<button class="row" data-go="${go}"><span class="dot"></span><div><b>${esc(t)}</b><span>${esc(s)}</span></div>${ic("back", "chev")}</button>`).join("")}</div>` : ""}
       <h2>Activity</h2>
       <div class="card list">${runs.length ? runs.map(r => { const b = botById(r.bot); return `<div class="row static"><span class="tile sm">${ic(b ? b.icon : "bot")}</span><div><b>${esc(b ? b.title : r.bot)}</b><span>${esc(r.summary)}</span></div><time>${U.ago(r.startedAt)}</time></div>`; }).join("") : `<p class="empty">No bot has run yet.</p>`}</div>`;
   }
 
+  function setupCard() {
+    if (cfg().setupDismissed) return "";
+    const anyAuthor = ["puzzle_books", "maze_books", "coloring_books", "notebooks"].some(id => Store.botConfig(id).author);
+    const steps = [
+      ["Find a niche", items().some(i => i.kind === "niche"), "bots", "Run the Niche Research Bot so bots make what buyers search for."],
+      ["Connect Claude", Claude.available(), "settings", IN_CLAUDE ? "" : "Add your Anthropic API key in Settings."],
+      ...(IS_NATIVE ? [["Connect Etsy", window.EB_AUTO.Etsy.connected(), "settings", "Lets approved products publish themselves."]] : []),
+      ["Set your pen name", anyAuthor, "bots", "Open a book bot's settings and add the author name."],
+      ["Approve your first products", items().some(i => ["approved", "listed"].includes(i.status)), "inbox", "Review what the bots made."],
+      ["Turn on Autopilot", !!(cfg().auto || {}).autopilot, "", "One switch below schedules everything."],
+    ].filter(s => s[3] !== "" || !s[1]);
+    const done = steps.filter(s => s[1]).length;
+    if (done === steps.length) return "";
+    return `<section class="card setup"><div class="ph"><div><b>Get set up</b><span class="muted"> ${done}/${steps.length} done</span></div><button class="iconbtn sm" data-act="dismiss-setup" aria-label="Hide">${ic("x")}</button></div>
+      <div class="track"><i style="width:${Math.round(done / steps.length * 100)}%"></i></div>
+      <div class="list">${steps.map(([t, ok, go, hint]) => `<button class="row" ${ok ? "disabled" : go === "settings" ? 'data-act="settings"' : go ? `data-tab="${go}"` : ""}><span class="checkmark ${ok ? "on" : ""}">${ok ? ic("check") : ""}</span><div><b>${esc(t)}</b>${ok ? "" : `<span>${esc(hint)}</span>`}</div></button>`).join("")}</div></section>`;
+  }
+  function problemsCard() {
+    const since = Date.now() - 2 * 864e5, latest = {};
+    Object.values(S.runs).forEach(r => { if (!latest[r.bot] || r.startedAt > latest[r.bot].startedAt) latest[r.bot] = r; });
+    const runs = Object.values(latest).filter(r => r.status === "error" && Date.parse(r.startedAt) > since);
+    const pubs = items().filter(i => i.publishError && i.status !== "listed");
+    if (!runs.length && !pubs.length) return "";
+    return `<h2>Needs attention</h2><div class="card list problems">${runs.map(r => `<div class="row static"><span class="tile sm err">${ic("x")}</span><div><b>${esc(botById(r.bot)?.title || r.bot)}</b><span>${esc(r.summary)}</span></div><button class="ghost" data-act="run" data-bot="${esc(r.bot)}">Retry</button></div>`).join("")}
+      ${pubs.map(i => `<div class="row static"><span class="tile sm err">${ic("x")}</span><div><b>${esc(i.title)}</b><span>${esc(i.publishError)}</span></div><button class="ghost" data-act="etsy-publish" data-id="${esc(i.id)}">Retry</button></div>`).join("")}</div>`;
+  }
+  function winnersCard() {
+    const w = window.EB_WIN.winners(3); if (!w.length) return "";
+    return `<h2>Your winners</h2><div class="card list">${w.map(([it, sc]) => { const st = it.data.stats || {}, sales = Object.values(S.earnings).filter(e => e.itemId === it.id).length;
+      return `<div class="row static"><button class="linkish" data-item="${esc(it.id)}"><b>${esc(it.title)}</b><span>${sales} sale${sales === 1 ? "" : "s"} · ${st.favorites || 0} favorites · ${st.views || 0} views</span></button><button class="ghost" data-act="variations" data-id="${esc(it.id)}">${ic("spark")}More like this</button></div>`; }).join("")}</div>`;
+  }
+
   function viewBots() {
     const cats = [...new Set(BOTS.map(b => b.category))];
-    return `${header("Bots", `${BOTS.length} workers · tap Run, or turn on autopilot in a bot's settings`)}
+    return `${header("Bots", `${BOTS.filter(b => !isOff(b)).length} active of ${BOTS.length} · tap Run, or switch on Autopilot on Home`)}
       <button class="primary wide" data-act="run-all">${ic("bolt")} Run all bots</button>
-      ${cats.map(cat => `<h2>${esc(cat)}</h2>${BOTS.filter(b => b.category === cat).map(botCard).join("")}`).join("")}
+      ${cats.map(cat => { const list = BOTS.filter(b => b.category === cat && !isOff(b)); return list.length ? `<h2>${esc(cat)}</h2>${list.map(botCard).join("")}` : ""; }).join("")}
+      ${BOTS.some(isOff) ? `<h2>Switched off</h2><div class="card list">${BOTS.filter(isOff).map(b => `<button class="row" data-act="bot-settings" data-bot="${b.id}"><span class="tile sm">${ic(b.icon)}</span><div><b>${esc(b.title)}</b><span>${esc(b.earnsVia)}</span></div>${ic("back", "chev")}</button>`).join("")}</div>` : ""}
       <p class="foot">More bots can be added any time: each one is a small plug-in.</p>`;
   }
   function botCard(b) {
@@ -243,8 +277,8 @@
         : `<div class="emptystate">${ic("inbox")}<b>Nothing to review</b><span>New work from your bots lands here.</span><button class="primary" data-tab="bots">${ic("play")}Run a bot</button></div>`}`;
   }
 
-  const LIB_FILTERS = [["all", "All"], ["products", "Printables & art"], ["books", "Books"], ["design", "Designs"], ["content", "Content"], ["leads", "Leads & jobs"], ["deal", "Deals"]];
-  const GROUPS = { products: ["printable", "wallart", "worksheet"], books: ["puzzlebook", "kdpbook", "ebook"], design: ["design"], content: ["content", "article", "post", "pin"], leads: ["lead", "opportunity", "gig"], deal: ["deal"] };
+  const LIB_FILTERS = [["all", "All"], ["products", "Printables & art"], ["books", "Books"], ["design", "Designs"], ["content", "Content"], ["leads", "Leads & jobs"], ["deal", "Deals"], ["research", "Research"]];
+  const GROUPS = { products: ["printable", "wallart", "worksheet"], books: ["puzzlebook", "kdpbook", "ebook"], design: ["design"], content: ["content", "article", "post", "pin"], leads: ["lead", "opportunity", "gig"], deal: ["deal"], research: ["niche"] };
   function viewLibrary() {
     let list = items().filter(i => i.status !== "pending" && i.status !== "rejected");
     if (ui.libKind !== "all") list = list.filter(i => (GROUPS[ui.libKind] || [ui.libKind]).includes(i.kind));
@@ -253,7 +287,7 @@
     list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const kindsHere = (GROUPS[ui.libKind] || []).length === 1 ? KINDS[GROUPS[ui.libKind][0]] : null;
     const statuses = kindsHere && kindsHere.pipeline ? kindsHere.pipeline : ui.libKind === "leads" ? ["new", "contacted", "applied", "won", "lost"] : ["approved", "listed"];
-    const labels = { approved: "To list", listed: "Live", new: "New", contacted: "Contacted", applied: "Applied", won: "Won", lost: "Lost", bought: "Bought", sold: "Sold", skipped: "Skipped" };
+    const labels = { approved: "To list", listed: "Live", new: "New", contacted: "Contacted", applied: "Applied", won: "Won", lost: "Lost", bought: "Bought", sold: "Sold", skipped: "Skipped", using: "In use" };
     return `${header("Library", `${list.length} item${list.length === 1 ? "" : "s"}`)}
       <label class="searchbox">${ic("search")}<input type="search" id="libsearch" placeholder="Search your library" value="${esc(ui.search)}"></label>
       <div class="chips">${LIB_FILTERS.map(([k, l]) => `<button class="chip ${ui.libKind === k ? "on" : ""}" data-lib="${k}">${l}</button>`).join("")}</div>
@@ -288,13 +322,15 @@
 
   function sheetItem(it) {
     const k = KINDS[it.kind] || {}, b = botById(it.bot), d = it.data;
-    const statusLabel = { pending: "Waiting for review", approved: "Approved, not listed yet", listed: "Live" }[it.status] || it.status;
+    const statusLabel = { pending: "Waiting for review", approved: "Approved, not listed yet", listed: "Live", using: "Fed to your bots", new: "New" }[it.status] || (it.status[0].toUpperCase() + it.status.slice(1));
     let body = "";
     if (it.kind === "content") body += `<div class="slides">${[0, ...(d.slides || []).map((_, i) => i + 1), (d.slides || []).length + 1].map(i => `<img src="${M.slideCanvas(it, i, 360).toDataURL("image/jpeg", 0.8)}" alt="">`).join("")}</div>`;
     else if (k.thumb) body += `<img class="hero-img" data-thumb="${esc(it.id)}" src="${thumb(it)}" alt="">`;
     if (it.kind === "lead") body += `<dl class="facts">${[["Type", d.category], ["Address", d.address], ["Phone", d.phone], ["Email", d.email], ["Social", d.social]].filter(f => f[1]).map(([a, v]) => `<dt>${a}</dt><dd>${esc(v)}</dd>`).join("")}</dl><h4>Pitch</h4><pre>${esc(d.pitchSubject)}\n\n${esc(d.pitchBody)}</pre>`;
     if (it.kind === "opportunity") body += `<dl class="facts">${[["Source", d.source], ["Company", d.company], ["Pay", d.salary], ["Location", d.location], ["Posted", d.date && new Date(d.date).toLocaleDateString()], ["Tags", (d.tags || []).join(", ")]].filter(f => f[1]).map(([a, v]) => `<dt>${a}</dt><dd>${esc(v)}</dd>`).join("")}</dl>${d.proposal ? `<h4>Your proposal</h4><pre>${esc(d.proposal)}</pre>` : ""}`;
     if (it.kind === "deal") body += `<dl class="facts"><dt>Price now</dt><dd>${U.fmt(Math.round(d.price * 100), d.currency)}</dd><dt>Your buy price</dt><dd>${U.fmt(Math.round(d.target * 100), d.currency)}</dd>${d.resell ? `<dt>Resale estimate</dt><dd>${U.fmt(Math.round(d.resell * 100), d.currency)} (profit about ${U.fmt(Math.round((d.resell - d.price) * 100), d.currency)})</dd>` : ""}</dl>`;
+    if (it.kind === "niche") body += `<div class="kpis inline"><div><b>${d.score}</b><span>score / 100</span></div><div><b>${d.etsy ? d.etsy.count.toLocaleString() : d.estimated ? `${d.est.competition}/10` : "?"}</b><span>${d.etsy ? "Etsy listings" : "competition"}</span></div><div><b>${d.etsy ? d.etsy.fav : d.estimated ? `${d.est.demand}/10` : d.suggestHits}</b><span>${d.etsy ? "avg favorites" : "demand"}</span></div></div>
+      <dl class="facts"><dt>Make</dt><dd>${esc(window.EB_WIN.TYPES[d.type] || d.type)}</dd>${d.angle ? `<dt>Angle</dt><dd>${esc(d.angle)}</dd>` : ""}${d.etsy && d.etsy.price ? `<dt>Typical price</dt><dd>${d.etsy.price}</dd>` : ""}<dt>Data</dt><dd>${d.estimated ? "Claude's estimate (no live data here)" : "Google + Amazon suggestions" + (d.etsy ? ", Etsy search" : "")}</dd></dl>`;
     if (it.kind === "article") body += `<p class="muted">Keyword: “${esc(d.keyword)}” · ${esc(d.meta)}</p><div class="article">${M.mdToHtml(d.markdown)}</div>`;
     if (it.kind === "puzzlebook") body += `<dl class="facts"><dt>Subtitle</dt><dd>${esc(d.subtitle)}</dd><dt>Puzzles</dt><dd>${d.count}, with solutions</dd><dt>Format</dt><dd>8.5 x 11 in paperback, large print</dd><dt>Price</dt><dd>${d.price.toFixed(2)} USD</dd></dl>`;
     if (["printable", "design", "puzzlebook", "content"].includes(it.kind)) {
@@ -311,10 +347,12 @@
       if (d.osm) acts.push(`<button class="ghost" data-act="open" data-url="${esc(d.osm)}">${ic("link")}Map</button>`);
     }
     if (it.kind === "opportunity") { acts.push(`<button class="primary" data-act="open" data-url="${esc(d.url)}">${ic("link")}Open</button>`); acts.push(`<button class="ghost" data-act="proposal" data-id="${esc(it.id)}">${ic("spark")}${ui.running["prop:" + it.id] ? "Writing..." : d.proposal ? "Rewrite proposal" : "Draft proposal"}</button>`); }
+    if (it.kind === "niche" && it.status !== "using") acts.push(`<button class="primary" data-act="use-niche" data-id="${esc(it.id)}">${ic("bolt")}Use this niche</button>`);
+    if (["printable", "wallart", "design", "kdpbook", "worksheet"].includes(it.kind) && it.status !== "pending") acts.push(`<button class="ghost" data-act="variations" data-id="${esc(it.id)}">${ic("spark")}Make 3 variations</button>`);
     if (it.kind === "deal") acts.push(`<button class="primary" data-act="open" data-url="${esc(d.url)}">${ic("link")}Open offer</button>`);
     const pipeline = k.pipeline ? `<div class="seg">${k.pipeline.map(s => `<button class="${it.status === s ? "on" : ""}" data-act="status" data-id="${esc(it.id)}" data-status="${s}">${s[0].toUpperCase() + s.slice(1)}</button>`).join("")}</div>` : "";
     const links = !k.pipeline && it.status !== "pending" ? `<form class="links" data-id="${esc(it.id)}"><h4>Where is it listed?</h4>${(k.platforms || ["Other"]).map(p => `<label>${esc(p)} link<input name="${esc(p)}" value="${esc((it.links || {})[p] || "")}" placeholder="https://..."></label>`).join("")}<button class="ghost">Save links</button></form>` : "";
-    const sold = it.status !== "pending" ? `<button class="ghost" data-act="add-sale" data-id="${esc(it.id)}">${ic("plus")}Log a sale</button>` : "";
+    const sold = it.status !== "pending" && it.kind !== "niche" ? `<button class="ghost" data-act="add-sale" data-id="${esc(it.id)}">${ic("plus")}Log a sale</button>` : "";
     return `<div class="sheet-head"><span class="kindtag">${ic(k.icon)}${esc(k.label || it.kind)}</span><button class="iconbtn" data-act="close" aria-label="Close">${ic("x")}</button></div>
       <h2 class="sheet-title">${esc(it.title)}</h2>
       <p class="muted">${esc(statusLabel)} · by ${esc(b ? b.title : it.bot)} · ${U.ago(it.createdAt)}${it.price ? ` · ${Number(it.price).toFixed(2)}` : ""}</p>
@@ -336,7 +374,7 @@
     return `<div class="sheet-head"><span class="kindtag">${ic(b.icon)}Bot settings</span><button class="iconbtn" data-act="close" aria-label="Close">${ic("x")}</button></div>
       <h2 class="sheet-title">${esc(b.title)}</h2><p class="muted">${esc(b.desc)}</p>
       ${botStats(b)}
-      <form class="botform" data-bot="${b.id}">${fields}${window.EB_AUTO.approveField(b)}
+      <form class="botform" data-bot="${b.id}"><label class="check"><input type="checkbox" name="active" ${isOff(b) ? "" : "checked"}> Bot is active (switched-off bots never run)</label>${fields}${window.EB_AUTO.approveField(b)}
         <label>Autopilot<select name="auto">${[[0, "Off: only when I tap Run"], [1, "Every hour"], [6, "Every 6 hours"], [12, "Every 12 hours"], [24, "Once a day"]].map(([h, l]) => `<option value="${h}" ${String(auto) === String(h) ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <p class="hint">Autopilot runs while the app is open. New work still waits in your Inbox.</p>
         <button class="primary wide">Save</button></form>${watches}`;
@@ -378,6 +416,7 @@
         <p class="hint">Gumroad > Settings > Advanced > Applications > create one and generate a token.</p>`}
         <button class="primary wide">Save settings</button></form>
       ${window.EB_AUTO.settingsSection()}
+      <h4>Diagnostics</h4><p class="muted">Checks every connection and shows what to fix.</p><button class="ghost" data-act="diagnostics">${ic("bolt")}Run checks</button><div id="diag"></div>
       <h4>Your data</h4><p class="muted">${S.mode === "claude" ? "Saved in this artifact's private database, wherever you open it in Claude." : "Saved on this device. Back it up now and then."} ${items().length} items, ${Object.keys(S.earnings).length} sales.</p>
       <div class="btns wrap"><button class="ghost" data-act="backup">${ic("download")}Back up</button><label class="btn ghost">${ic("sync")}Restore<input type="file" id="restore" accept=".json,application/json" hidden></label></div>
       <p class="foot">Earning Bots ${VERSION} · ${S.mode === "claude" ? "running in Claude" : IS_NATIVE ? "Android app" : "browser"}</p>`;
@@ -457,6 +496,15 @@ Return JSON {"proposal": "..."}`);
         } catch (e) { toast("Couldn't write it: " + (e.message || e), "error"); }
         delete ui.running["prop:" + id]; renderSheet(); return;
       }
+      case "use-niche": await window.EB_WIN.useNiche(it.data); toast(`“${it.data.keyword}” sent to your bots`); return renderSheet();
+      case "variations": { try { const n = await window.EB_WIN.variations(it); toast(`${n} variation${n === 1 ? "" : "s"} waiting in your Inbox`); } catch (e) { toast(e.message, "error"); } return; }
+      case "dismiss-setup": return Store.setConfig({ setupDismissed: true });
+      case "diagnostics": {
+        const box = document.getElementById("diag"); box.innerHTML = `<p class="muted"><span class="spin"></span> Checking...</p>`;
+        const res = await window.EB_AUTO.diagnostics();
+        box.innerHTML = `<div class="list mini">${res.map(([n, ok, msg]) => `<div class="row static"><span class="checkmark ${ok ? "on" : "bad"}">${ic(ok ? "check" : "x")}</span><div><b>${esc(n)}</b><span>${esc(msg)}</span></div></div>`).join("")}</div>`;
+        return;
+      }
       case "delete-item": if (it) { await Store.remove("items", id); closeSheet(); toast("Deleted"); } return;
       case "add-sale": return openSheet({ type: "sale", itemId: id || "" });
       case "del-sale": return Store.remove("earnings", id);
@@ -517,7 +565,8 @@ Return JSON {"proposal": "..."}`);
     if (await window.EB_AUTO.handleSubmit(f, fd)) { renderSheet(); return render(); }
     if (f.classList.contains("botform")) {
       const b = botById(f.dataset.bot), vals = {};
-      for (const [k, v] of fd.entries()) vals[k] = k === "auto" ? parseFloat(v) || 0 : String(v);
+      for (const [k, v] of fd.entries()) if (k !== "active") vals[k] = k === "auto" ? parseFloat(v) || 0 : String(v);
+      vals.disabled = !fd.has("active"); if (vals.disabled) vals.auto = 0;
       await Store.setBotConfig(b.id, vals); closeSheet(); toast(`${b.title} settings saved`);
     } else if (f.classList.contains("addwatch")) {
       const id = U.uid();
@@ -566,6 +615,7 @@ Return JSON {"proposal": "..."}`);
   render();
   window.EB.startStorage();
   setInterval(autopilot, 5 * 60 * 1000);
+  setTimeout(() => window.EB_AUTO.reminders(), 3000);
   setTimeout(autopilot, 20000);
   if (document.fonts) document.fonts.ready.then(() => { thumbs.clear(); render(); });
 })();

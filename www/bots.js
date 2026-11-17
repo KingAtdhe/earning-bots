@@ -139,7 +139,8 @@
         for (const b of Object.keys(D.BUNDLES)) for (const t of Object.keys(D.THEMES)) if (!Store.S.items[`${b}-${t.toLowerCase()}`]) todo.push([b, t]);
         if (!todo.length) return "The catalogue is complete. Run the Idea Bot for new products.";
         const counts = {}; Object.values(Store.S.items).forEach(i => { if (i.kind === "printable") counts[i.data.bundleKey] = (counts[i.data.bundleKey] || 0) + 1; });
-        const pickList = U.shuffle(todo).sort((a, b) => (counts[a[0]] || 0) - (counts[b[0]] || 0)).slice(0, ctx.cfg.perRun);
+        const win = window.EB_WIN ? window.EB_WIN.prefer("printable", "bundleKey") : {};
+        const pickList = U.shuffle(todo).sort((a, b) => ((counts[a[0]] || 0) - (win[a[0]] || 0) * 3) - ((counts[b[0]] || 0) - (win[b[0]] || 0) * 3)).slice(0, ctx.cfg.perRun);
         for (const [bk, theme] of pickList) await addPrintable(ctx, `${bk}-${theme.toLowerCase()}`, bk, { ...D.BUNDLES[bk] }, theme);
         return `${pickList.length} printables ready to review. ${todo.length - pickList.length} more in the catalogue.`;
       },
@@ -177,6 +178,7 @@ Return a JSON array. Each item: {"name": product name in Title Case, max 45 char
         { key: "type", label: "Book type", type: "select", def: "mixed", options: [["mixed", "Alternate Sudoku and Word Search"], ["sudoku", "Sudoku"], ["wordsearch", "Word Search"]] },
         { key: "count", label: "Puzzles per book", type: "select", def: "100", options: [["50", "50"], ["100", "100"]] },
         { key: "author", label: "Author / pen name", type: "text", def: "", placeholder: "the name printed on the book" },
+        { key: "themes", label: "Word search themes (from research)", type: "text", def: "", placeholder: "e.g. gardening, bible, cats" },
       ],
       async run(ctx) {
         const books = Object.values(Store.S.items).filter(i => i.kind === "puzzlebook").map(i => i.data);
@@ -191,8 +193,9 @@ Return a JSON array. Each item: {"name": product name in Title Case, max 45 char
           spec.level = U.pick(["easy", "hard"]);
           if (Claude.available()) {
             ctx.progress("Asking Claude for a fresh theme...");
+            const wanted = String(ctx.cfg.themes || "").split(",").map(s => s.trim()).filter(t => t && !usedThemes.map(u => u.toLowerCase()).includes(t.toLowerCase()));
             const res = await Claude.json(`Create content for a large-print word search book for adults that sells on Amazon KDP.
-Pick ONE popular theme not in this list: ${usedThemes.join(", ") || "none"}. Then give 25 puzzle topics within that theme, each with exactly 20 English words (single words, letters only, 4 to 12 letters, no proper nouns or brand names).
+${wanted.length ? `Use this theme (it was researched as in demand): ${wanted[0]}.` : `Pick ONE popular theme not in this list: ${usedThemes.join(", ") || "none"}.`} Then give 25 puzzle topics within that theme, each with exactly 20 English words (single words, letters only, 4 to 12 letters, no proper nouns or brand names).
 Return JSON: {"theme": short theme name like "Gardening", "lists": [{"topic": "...", "words": ["..."]}]}`);
             if (res && res.theme && Array.isArray(res.lists) && res.lists.length) {
               spec.theme = U.clampStr(res.theme, 30); spec.lists = res.lists.filter(l => Array.isArray(l.words) && l.words.length >= 10).map(l => ({ topic: U.clampStr(l.topic, 40), words: l.words.map(String) }));
@@ -227,7 +230,7 @@ Return a JSON array of {"lines": ["..."], "niche": "...", "title": product title
           const T = [["WORLD'S OKAYEST", "{role}"], ["POWERED BY", "COFFEE", "AND {thing}"], ["{thing}", "IS MY", "THERAPY"], ["I'D RATHER BE", "{doing}"], ["JUST ONE MORE", "{thing}"], ["{thing} MODE", "ON"], ["OFFICIALLY", "{role}", "OFF DUTY"]];
           const forms = n => ({ thing: n.toUpperCase(), role: n.toUpperCase().replace(/S$/, ""), doing: n.toUpperCase().endsWith("ING") ? n.toUpperCase() : `${n.toUpperCase()}` });
           ideas = Array.from({ length: ctx.cfg.perRun }, () => {
-            const n = U.pick(niches.length ? niches : ["coffee"]), f = forms(n);
+            const n = window.EB_WIN.weightedPick(niches.length ? niches : ["coffee"], window.EB_WIN.prefer("design", "niche")), f = forms(n);
             const fits = T.filter(t => !(t.join(" ").includes("{doing}") && !f.doing.endsWith("ING")) && !(t.join(" ").includes("COFFEE") && f.thing === "COFFEE") && !(t.join(" ").includes("{role}") && /ING$/.test(f.role)));
             const t = U.pick(fits.length ? fits : T);
             const lines = t.map(l => l.replace("{thing}", f.thing).replace("{role}", f.role).replace("{doing}", f.doing));
