@@ -232,3 +232,4 @@ label.check input { width: 20px; height: 20px; margin: 1px 0 0; flex: none; acce
 .qabox{border:1px solid var(--line,#e4e1da);border-radius:12px;padding:10px 12px;margin:12px 0;background:var(--card,#fff)}
 .qahead{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.qahead .qa{margin:0}
 .qalist{margin:8px 0 4px;padding-left:18px}.qalist li{margin:2px 0}.qalist li.hard{color:#a3261b;font-weight:600}
+.linkbtn{background:none;border:0;padding:0;color:var(--accent,#2f6b4f);font:inherit;font-weight:600;text-decoration:underline;cursor:pointer}

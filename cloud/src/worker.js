@@ -179,7 +179,7 @@ async function tick(env, onlyBot) {
     done.push({ bot: bot.id, ...(await runBot(env, bot)) });
   } else if (auto.cloud !== false) {
     // run the most overdue bot (one per tick keeps each run small and reliable)
-    const due = BOTS.filter(b => CLOUD_BOTS.has(b.id) && !Store.botConfig(b.id).disabled && parseFloat(Store.botConfig(b.id).auto || 0) > 0 && !missing(b))
+    const due = BOTS.filter(b => CLOUD_BOTS.has(b.id) && !globalThis.EB_BOTS.hidden(b) && !Store.botConfig(b.id).disabled && parseFloat(Store.botConfig(b.id).auto || 0) > 0 && !missing(b))
       .map(b => ({ b, over: now - lastRun(b.id) - parseFloat(Store.botConfig(b.id).auto) * 3600e3 })).filter(x => x.over >= 0).sort((a, b) => b.over - a.over);
     if (due.length) done.push({ bot: due[0].b.id, ...(await runBot(env, due[0].b)) });
     const lastSync = Number(await meta(env, "last_sales_sync")) || 0;

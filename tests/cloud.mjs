@@ -27,7 +27,7 @@ await pg.goto(`http://127.0.0.1:${server.address().port}/`); await pg.waitForFun
 // local work before connecting: an approved printable and autopilot settings
 await pg.evaluate(async () => {
   const S = window.EB.Store; await S.setConfig({ auto: { autopilot: true, salesSync: false } });
-  for (const id of ["product_factory", "maze_books", "notebooks", "wall_art"]) await S.setBotConfig(id, { auto: 24, approve: id === "product_factory" ? "auto" : "manual" });
+  for (const id of ["product_factory", "maze_books", "worksheets", "wall_art", "notebooks"]) await S.setBotConfig(id, { auto: 24, approve: id === "product_factory" ? "auto" : "manual" });
   await S.save("items", "local-1", { id: "local-1", bot: "manual", kind: "lead", title: "Made on the phone", status: "new", createdAt: new Date().toISOString(), data: { name: "Cafe" }, links: {} });
 });
 await pg.evaluate(url => window.EB_CLOUD.connect(url), CLOUD);
@@ -48,6 +48,7 @@ check("auto-approve setting applied in the cloud", cloudItems.some(d => d.data.b
 const runs = r.data.docs.filter(d => d.col === "runs" && d.data && d.data.cloud);
 check("each due bot ran once", new Set(runs.map(d => d.data.bot)).size === runs.length && runs.length === 4, JSON.stringify(runs.map(d => d.data.bot)));
 await api("POST", "/tick", null, token);
+check("bots that need manual work don't run in the cloud", !runs.some(d => d.data.bot === "notebooks"));
 check("nothing runs twice before its interval", (await api("GET", "/sync?since=0", null, token)).data.docs.filter(d => d.col === "runs").length === 4);
 
 console.log("Phone receives and edits");

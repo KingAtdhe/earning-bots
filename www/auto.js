@@ -76,7 +76,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     const fresh = S.items[it.id];
     try {
       if (fresh.kind === "post" && Store.botConfig("social_poster").autoSchedule === "on" && mcp && auto().metricool) { await Metricool.schedule(fresh); if (!quiet) toast("Scheduled in Metricool"); }
-      if (human && auto().etsyPublish && destination(fresh)) { const where = await publishItem(fresh); if (!quiet && where) toast(`Published on ${where}`); }
+      if (human && auto().etsyPublish !== false && destination(fresh)) { const where = await publishItem(fresh); if (!quiet && where) toast(`Published on ${where}`); }
     } catch (e) { await Store.patch("items", it.id, { publishError: e.message }); toast(e.message, "error"); }
   }
 
@@ -166,11 +166,11 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
   // ---- Etsy (Android app) --------------------------------------------------------------------------
   const ETSY_API = "https://api.etsy.com/v3/application", REDIRECT = "https://localhost/etsy-callback.html";
   // ebooks are left out on purpose: Etsy requires guides and instructions to be the seller's own work, not AI-written
-  const ETSY_KINDS = { dplanner: ["digital planners", "planners", "calendars & planners"], paperpack: ["digital paper", "scrapbooking paper", "paper"], partygame: ["party games", "party supplies", "games", "paper"], carddeck: ["flash cards", "card games", "stationery", "games", "paper"], printable: ["calendars & planners", "planners"], wallart: ["prints", "digital prints"], worksheet: ["worksheets", "educational", "learning"], design: null };
+  const ETSY_KINDS = { kdpbook: ["coloring pages", "coloring books", "activity books", "puzzles"], puzzlebook: ["puzzles", "activity books", "games"], dplanner: ["digital planners", "planners", "calendars & planners"], paperpack: ["digital paper", "scrapbooking paper", "paper"], partygame: ["party games", "party supplies", "games", "paper"], carddeck: ["flash cards", "card games", "stationery", "games", "paper"], printable: ["calendars & planners", "planners"], wallart: ["prints", "digital prints"], worksheet: ["worksheets", "educational", "learning"], design: null };
   const Etsy = {
     connected: () => !!LS.get("eb_etsy_token", null),
     key() { const k = LS.get("eb_etsy_key", ""), s = LS.get("eb_etsy_secret", ""); return s ? `${k}:${s}` : k; },
-    canPublish: it => IS_NATIVE && Etsy.connected() && !!ETSY_KINDS[it.kind] && !(it.links || {}).Etsy,
+    canPublish: it => IS_NATIVE && Etsy.connected() && !!ETSY_KINDS[it.kind] && !(it.links || {}).Etsy && (it.kind !== "kdpbook" || ["coloring", "maze"].includes(it.data.type)),
     async connect() {
       const key = LS.get("eb_etsy_key", ""); if (!key) throw new Error("Add your Etsy keystring and shared secret first.");
       const verifier = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(48)))).replace(/[^a-zA-Z0-9]/g, "").slice(0, 64);
@@ -241,8 +241,9 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
       const steps = assets(S.items[it.id]);
       if (!job.listingId) {
         const disclosure = d.aiUsed ? "\n\nHOW THIS WAS MADE\nDesigned by our shop. The text in this design was written with the help of AI and reviewed by us before listing." : "";
-        const listing = await Etsy.api("POST", `/shops/${shop}/listings`, { quantity: 999, title: String(d.title || it.title).slice(0, 140), description: (d.description || "") + disclosure, price: Number(it.price || d.price || 4.9).toFixed(2),
-          who_made: "i_did", when_made: "made_to_order", taxonomy_id: await Etsy.taxonomy(it.kind), type: "download", is_supply: "false", tags: (d.tags || []).slice(0, 13).join(",") });
+        const L = (window.EB_BOTS3 && window.EB_BOTS3.etsyListingFor(it)) || { title: d.title || it.title, description: d.description, tags: d.tags, price: it.price || d.price };
+        const listing = await Etsy.api("POST", `/shops/${shop}/listings`, { quantity: 999, title: String(L.title).slice(0, 140), description: (L.description || "") + disclosure, price: Number(L.price || 4.9).toFixed(2),
+          who_made: "i_did", when_made: "made_to_order", taxonomy_id: await Etsy.taxonomy(it.kind), type: "download", is_supply: "false", tags: (L.tags || []).slice(0, 13).join(",") });
         job = await save({ listingId: listing.listing_id, images: 0, files: 0, active: false });
         Log.add("info", `Etsy draft ${job.listingId} created for ${it.id}`);
       }
@@ -298,6 +299,8 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
       for (const size of Object.keys(D.SIZES)) { files.push([`${U.slug(d.shortName)}-${size}.pdf`, async () => D.makePdf(p, size)]); files.push([`${U.slug(d.shortName)}-${size}-low-ink.pdf`, async () => D.makePdf(p, size, true)]); }
     } else if (it.kind === "wallart") {
       for (const [key] of A.SIZES) files.push([`${U.slug(d.title).slice(0, 40)}-${key}.jpg`, async () => { const cv = A.artCanvas(it, key, maxArt()); const b = await Files.canvasBlob(cv, "image/jpeg", 0.93); release(cv); return b; }]);
+    } else if (it.kind === "kdpbook" && ["coloring", "maze"].includes(d.type)) { files.push([`${U.slug(d.title).slice(0, 50)}.pdf`, async () => K.interior(it)]);
+    } else if (it.kind === "puzzlebook") { files.push([`${U.slug(d.title).slice(0, 50)}.pdf`, async () => window.EB_PUZZLES.interiorPdf(it).blob]);
     } else if (it.kind === "worksheet") { files.push([`${U.slug(d.title)}.pdf`, async () => K.interior(it)]); }
     if (window.EB_BOTS3) files.push(...window.EB_BOTS3.etsyFiles(it));
     return { images, files };
@@ -326,7 +329,23 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     await setAuto({ lastSync: U.now() });
     if (!quiet || msgs.some(m => m.includes(":"))) toast(msgs.join(" · ") || "No sales platforms connected", msgs.some(m => m.includes(":")) ? "error" : "ok");
   }
+  // live Etsy listings the Listing Optimizer improved: send the new title and tags to Etsy
+  async function pushEtsyUpdates(max = 10) {
+    if (!IS_NATIVE || !Etsy.connected()) return 0;
+    const todo = Object.values(S.items).filter(i => i.data && i.data.etsyNeedsUpdate && i.data.etsyId).slice(0, max); if (!todo.length) return 0;
+    const t = await Etsy.token(); let n = 0;
+    for (const it of todo) {
+      try {
+        if (validate(it).length) continue;
+        await Etsy.api("PATCH", `/shops/${t.shop_id}/listings/${it.data.etsyId}`, { title: String(it.data.title).slice(0, 140), tags: (it.data.tags || []).slice(0, 13).join(",") });
+        await Store.patch("items", it.id, { data: { ...S.items[it.id].data, etsyNeedsUpdate: false, etsyUpdatedAt: U.now() } }); n++;
+      } catch (e) { Log.add("warn", `Etsy update for ${it.id}: ${e.message}`); }
+    }
+    if (n) Log.add("info", `Updated ${n} live Etsy listing${n > 1 ? "s" : ""} with better titles and tags`);
+    return n;
+  }
   async function periodic() {
+    try { await pushEtsyUpdates(); } catch { /* next time */ }
     if (window.EB_CLOUD && window.EB_CLOUD.connected()) return; // the cloud syncs sales
     const a = auto(); if (a.salesSync && Date.now() - Date.parse(a.lastSync || 0) > 6 * 3600e3) await syncSales(true);
   }
@@ -337,7 +356,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     const bots = { ...(cfg().bots || {}) };
     for (const b of BOTS) {
       const runnable = !((b.needs || []).includes("claude") && !Claude.available()) && !((b.needs || []).includes("web") && !Web.available());
-      const off = (bots[b.id] || {}).disabled;
+      const off = (bots[b.id] || {}).disabled || window.EB_BOTS.hidden(b);
       bots[b.id] = { ...(bots[b.id] || {}), auto: on && runnable && !off ? PRESET[b.category] || 24 : 0, approve: on ? (Claude.available() ? "review" : "manual") : (bots[b.id] || {}).approve || "manual" };
     }
     await Store.setConfig({ bots, auto: { ...auto(), autopilot: on, salesSync: on ? true : auto().salesSync, etsyPublish: on && Etsy.connected() ? true : auto().etsyPublish } });
@@ -354,7 +373,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     const a = auto(), on = BOTS.filter(b => parseFloat(Store.botConfig(b.id).auto || 0)).length, C = window.EB_CLOUD;
     const parts = [`${on}/${BOTS.length} bots scheduled`];
     if (C && C.connected()) parts.unshift("running 24/7 in your cloud");
-    if (a.etsyPublish && Etsy.connected()) parts.push("Etsy auto-publish");
+    if (a.etsyPublish !== false && Etsy.connected()) parts.push("Etsy auto-publish");
     if (a.gmailDrafts) parts.push("Gmail drafts"); if (a.metricool) parts.push("Metricool");
     if (a.salesSync) parts.push("sales sync");
     const queue = Object.values(S.items).filter(i => destination(i));
@@ -369,7 +388,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     let h = `<h4>Automation</h4><form class="autoform">
       <label class="check"><input type="checkbox" name="salesSync" ${a.salesSync ? "checked" : ""}> Sync sales automatically every 6 hours${IS_NATIVE ? "" : " (Android app)"}</label>
       <label class="check"><input type="checkbox" name="aiPhotoCheck" ${a.aiPhotoCheck !== false ? "checked" : ""}> Claude looks at each new design's main photo (up to 6 per run)</label>`;
-    if (IS_NATIVE) h += `<label class="check"><input type="checkbox" name="etsyPublish" ${a.etsyPublish ? "checked" : ""}> When I approve a product, upload it right away (Etsy, Printify, Pinterest)</label>
+    if (IS_NATIVE) h += `<label class="check"><input type="checkbox" name="etsyPublish" ${a.etsyPublish !== false ? "checked" : ""}> When I approve a product, upload it right away (Etsy, Printify, Pinterest)</label>
       <label class="check"><input type="checkbox" name="etsyActivate" ${a.etsyActivate !== false ? "checked" : ""}> Make Etsy listings live right away (USD 0.20 each), otherwise save as drafts</label>`;
     if (IN_CLAUDE) h += `<label class="check"><input type="checkbox" name="gmailDrafts" ${a.gmailDrafts ? "checked" : ""}> Put Client Finder pitches in Gmail as drafts (never sent automatically)</label>`;
     h += `<button class="ghost">Save automation</button></form>`;
@@ -483,5 +502,5 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
   }
 
   setTimeout(() => Etsy.finish(), 1500);
-  window.EB_AUTO = { validate, assets, release, publishAll, destination, diagnostics, reminders, afterRun, approve, periodic, syncSales, approveField, homeCard, settingsSection, handleAct, handleSubmit, itemActions, Etsy, Metricool };
+  window.EB_AUTO = { pushEtsyUpdates, validate, assets, release, publishAll, destination, diagnostics, reminders, afterRun, approve, periodic, syncSales, approveField, homeCard, settingsSection, handleAct, handleSubmit, itemActions, Etsy, Metricool };
 })();

@@ -615,5 +615,67 @@ Return JSON {"name": deck name max 40 chars, "short": 1-3 word label, "who": who
     return { pages, blob: await kdpFullCover(it, pages) };
   }
 
-  window.EB_BOTS3 = { kdpFullCover, kdpCoverFiles,  plannerBuilders, plannerPlan, partyBuilders, deckBuilders, cardCanvas, deckCover, paperCanvas, paperPreview, renderPage, etsyFiles, pdfPageCount, plannerPdf, partyPdf, deckPdf, PAPER_PALETTES, PL_THEMES, PARTY, DECKS, PATTERNS };
+  // ---- books also sell on Etsy as printable PDFs (no upload by hand needed) ---------------------------
+  function mazeCanvas(seed, size = 900, n = 16) {
+    const c = document.createElement("canvas"); c.width = size; c.height = size; const x = c.getContext("2d"); x.fillStyle = "#fff"; x.fillRect(0, 0, size, size);
+    const mz = window.EB_KDP.maze(n, n, seed), pad = size * 0.04, cell = (size - 2 * pad) / n; x.strokeStyle = "#111"; x.lineWidth = Math.max(2, cell * 0.11); x.lineCap = "round";
+    for (let i = 0; i < n * n; i++) { const cx = pad + (i % n) * cell, cy = pad + Math.floor(i / n) * cell, w = mz.walls[i]; x.beginPath(); if (w & 1) { x.moveTo(cx, cy); x.lineTo(cx + cell, cy); } if (w & 8) { x.moveTo(cx, cy); x.lineTo(cx, cy + cell); } if (w & 4) { x.moveTo(cx, cy + cell); x.lineTo(cx + cell, cy + cell); } if (w & 2) { x.moveTo(cx + cell, cy); x.lineTo(cx + cell, cy + cell); } x.stroke(); }
+    return c;
+  }
+  // an interior page as it looks printed (Letter proportions)
+  function bookPage(it, i, width = 1100) {
+    const d = it.data, H = Math.round(width * 11 / 8.5), c = document.createElement("canvas"); c.width = width; c.height = H; const x = c.getContext("2d");
+    x.fillStyle = "#fff"; x.fillRect(0, 0, width, H);
+    const art = d.type === "coloring" ? window.EB_KDP.mandalaCanvas(d.seeds[i % d.seeds.length], 1000) : mazeCanvas(d.seeds[i % d.seeds.length], 1000, Math.min(d.w || 16, 24));
+    const sz = width * 0.86; x.drawImage(art, (width - sz) / 2, (H - sz) / 2 + (d.type === "maze" ? width * 0.04 : 0), sz, sz); art.width = 0;
+    if (d.type === "maze") { x.fillStyle = "#222"; x.font = `700 ${width * 0.035}px Inter, Arial, sans-serif`; x.textAlign = "center"; x.fillText(`Maze ${i + 1}`, width / 2, H * 0.12); }
+    return c;
+  }
+  const EXTRA = { coloring: "printable coloring pages, PDF", maze: "printable mazes, PDF" };
+  function etsyListingFor(it) {
+    const d = it.data || {}, n = (d.seeds || []).length;
+    if (it.kind === "kdpbook" && d.type === "coloring") return {
+      title: `${n} Mandala Coloring Pages for Adults, Printable Coloring Book PDF, Relaxing Mandala Designs, Stress Relief Coloring, Instant Download`.slice(0, 140),
+      tags: ["mandala coloring", "coloring pages", "adult coloring", "printable coloring", "coloring book pdf", "mandala pages", "stress relief", "relaxing coloring", "mindfulness gift", "coloring for adults", "digital coloring", "zen coloring", "instant download"],
+      description: `${n} original mandala designs to print and color, from simple to detailed.
+
+- One design per US Letter page (prints on A4 too)
+- Print a page as often as you like for personal use
+- Works with colored pencils, gel pens and fine markers
+
+This is a digital download (PDF). No physical item will be shipped.`, price: 4.5 };
+    if (it.kind === "kdpbook" && d.type === "maze") {
+      const who = d.level === "easy" ? "Kids 6-9" : d.level === "medium" ? "Kids 8-12" : "Teens and Adults";
+      return { title: `${n} Printable Mazes for ${who}, ${d.level[0].toUpperCase() + d.level.slice(1)} Maze Puzzles with Solutions, PDF Activity Pages, Screen Free Fun, Instant Download`.slice(0, 140),
+        tags: ["printable mazes", "maze puzzles", "kids activity", "maze worksheets", "activity pages", "brain games", "screen free", "puzzles for kids", "homeschool", "quiet time", "road trip games", "maze book", "instant download"],
+        description: `${n} ${d.level} mazes to print, with full solutions at the back.
+
+- One big maze per US Letter page (prints on A4 too)
+- ${d.level === "hard" ? "Challenging designs for teens and adults" : "Just the right challenge to build focus and problem solving"}
+- Print as many copies as you need for your family or class
+
+This is a digital download (PDF). No physical item will be shipped.`, price: 3.9 };
+    }
+    if (it.kind === "puzzlebook") {
+      const what = d.type === "sudoku" ? `${d.count} ${d.level} Sudoku Puzzles` : `${d.count} Large Print Word Search Puzzles${d.theme ? ", " + d.theme : ""}`;
+      return { title: `${what}, Printable Puzzle Book PDF with Solutions, Large Print, Instant Download`.slice(0, 140),
+        tags: [d.type === "sudoku" ? "sudoku puzzles" : "word search", d.type === "sudoku" ? "printable sudoku" : "printable word find", "puzzle book", "large print puzzles", "brain games", "puzzles for adults", "printable puzzles", "activity pages", "senior activities", "puzzle pdf", "with solutions", "gift for grandma", "instant download"],
+        description: `${what}, ready to print, with every solution included.
+
+- Large, easy-to-read print on US Letter pages (prints on A4 too)
+- Print a page or the whole book, as often as you like for personal use
+- Great for travel, waiting rooms and quiet evenings
+
+This is a digital download (PDF). No physical item will be shipped.`, price: 4.9 };
+    }
+    return null;
+  }
+
+  // Bots that still need you to upload or do the work by hand (Amazon KDP-only notebooks, Gumroad ebooks,
+  // newsletters, social posts, articles, client work, deals). Hidden unless you switch them on in Settings.
+  const MANUAL = new Set(["notebooks", "ebook_bot", "newsletter_bot", "social_poster", "content_bot", "article_bot", "gig_bot", "lead_finder", "job_scanner", "price_watch"]);
+  window.EB_BOTS.MANUAL = MANUAL;
+  window.EB_BOTS.hidden = b => MANUAL.has(b.id) && !(Store.config().showManual);
+
+  window.EB_BOTS3 = { etsyListingFor, bookPage, mazeCanvas, MANUAL, kdpFullCover, kdpCoverFiles,  plannerBuilders, plannerPlan, partyBuilders, deckBuilders, cardCanvas, deckCover, paperCanvas, paperPreview, renderPage, etsyFiles, pdfPageCount, plannerPdf, partyPdf, deckPdf, PAPER_PALETTES, PL_THEMES, PARTY, DECKS, PATTERNS };
 })();

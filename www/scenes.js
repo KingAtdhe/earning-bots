@@ -357,7 +357,19 @@
       if (n > 1) out.push(["tablet", () => { const pg = K.worksheetPage(it, 1); const c = tabletScene(pg, seed); free(pg); return c; }]);
     }
     const B3 = window.EB_BOTS3;
-    if (B3 && it.kind === "dplanner") {
+    if (B3 && it.kind === "kdpbook" && ["coloring", "maze"].includes(d.type)) {
+      const L = B3.etsyListingFor(it), n = d.seeds.length, what = d.type === "coloring" ? "coloring pages" : "mazes";
+      out.push(["cover", () => { const c = K.cover(it, 1500); const o = onBackdrop(c); free(c); return o; }]);
+      out.push(["desk:page", () => { const pg = B3.bookPage(it, 0); const c = deskScene(pg, seed, { badge: `${n} printable ${what} · instant download` }); free(pg); return c; }]);
+      out.push(["included", () => { const t = [0, 1, 2, 3].map(i => [B3.bookPage(it, i, 520), d.type === "coloring" ? `Design ${i + 1}` : `Maze ${i + 1}`]); const c = includedGrid(t, { heading: `${n} ${what} included`, sub: d.type === "maze" ? "Solutions at the back · US Letter PDF" : "One design per page · US Letter PDF" }); t.forEach(([c2]) => free(c2)); return c; }]);
+      out.push(["clipboard", () => { const pg = B3.bookPage(it, 2); const c = clipboardScene(pg, seed); free(pg); return c; }]);
+      out.push(["details", () => detailsCard({ heading: L.title.split(",")[0], features: [[`${n} ${what}`, d.type === "maze" ? `${d.level} level, with solutions` : "From simple to detailed"], ["US Letter PDF", "Prints fine on A4 too"], ["Print as often as you like", "For personal use"], ["Instant digital download", "No physical item will be shipped"]] })]);
+    } else if (B3 && it.kind === "puzzlebook") {
+      const L = B3.etsyListingFor(it);
+      out.push(["cover", () => { const c = window.EB_PUZZLES.coverCanvas(it, 1500); const o = onBackdrop(c); free(c); return o; }]);
+      out.push(["desk:cover", () => { const c = window.EB_PUZZLES.coverCanvas(it, 1100); const o = deskScene(c, seed, { badge: "Large print · solutions included" }); free(c); return o; }]);
+      out.push(["details", () => detailsCard({ heading: L.title.split(",")[0], features: [[`${d.count} puzzles`, d.type === "sudoku" ? `${d.level} level` : d.theme || "Word search"], ["Every solution included", "At the back of the book"], ["Large print, US Letter PDF", "Prints fine on A4 too"], ["Instant digital download", "No physical item will be shipped"]] })]);
+    } else if (B3 && it.kind === "dplanner") {
       const { out: pages, plan } = B3.plannerBuilders(d), pg = (i, w = 1400) => B3.renderPage(pages[i](), w);
       const fit = c => { const o = onBackdrop(c, [236, 233, 228]); free(c); return o; };
       out.push(["tablet:cover", () => { const c = pg(0); const o = tabletLandscape(c, seed, { badge: "Hyperlinked: tap a tab or a day to jump there" }); free(c); return o; }]);

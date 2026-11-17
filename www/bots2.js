@@ -295,7 +295,7 @@ Return a JSON array of {"id": "...", "title": "...", "tags": ["..."]} in the sam
       for (const s of r) {
         const it = Store.S.items[s.id]; if (!it || !s.title) continue;
         const tags = (s.tags || []).map(t => String(t).toLowerCase().slice(0, 20)).filter(Boolean).slice(0, 13);
-        await Store.patch("items", it.id, { data: { ...it.data, previous: { title: it.data.title, tags: it.data.tags }, title: String(s.title).slice(0, 140), tags: tags.length ? tags : it.data.tags, optimizedAt: U.now() } });
+        await Store.patch("items", it.id, { data: { ...it.data, previous: { title: it.data.title, tags: it.data.tags }, title: String(s.title).slice(0, 140), tags: tags.length ? tags : it.data.tags, optimizedAt: U.now(), etsyNeedsUpdate: !!it.data.etsyId } });
         n++;
       }
       return `${n} listings optimized. Update them on Etsy with the Copy buttons${window.EB.IS_NATIVE ? " or the Etsy sync" : ""}.`;

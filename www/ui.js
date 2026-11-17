@@ -5,7 +5,7 @@
   const { BOTS, KINDS, PLATFORMS } = window.EB_BOTS;
   const M = window.EB_MEDIA;
   const S = Store.S, esc = U.esc;
-  const VERSION = "4.2";
+  const VERSION = "4.3";
 
   const ICONS = {
     tablet: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M17 5v14"/><path d="M19 8h2M19 11h2M19 14h2"/>',
@@ -51,6 +51,7 @@
     return "";
   }
   const isOff = b => !!Store.botConfig(b.id).disabled;
+  const shown = b => !window.EB_BOTS.hidden(b);
   function botCfg(bot) {
     const out = {};
     (bot.settings || []).forEach(s => { out[s.key] = s.def; });
@@ -121,7 +122,7 @@
     render();
   }
   async function runAll() {
-    const ready = BOTS.filter(b => !isOff(b) && !missingNeeds(b) && !(b.watches && !Object.keys(S.watches).length));
+    const ready = BOTS.filter(b => shown(b) && !isOff(b) && !missingNeeds(b) && !(b.watches && !Object.keys(S.watches).length));
     if (!ready.length) return toast("No bot can run here yet. Check Settings.", "error");
     toast(`Running ${ready.length} bots...`);
     for (const b of ready) await runBot(b, true);
@@ -129,7 +130,7 @@
   // autopilot: while the app is open, run bots whose interval has passed
   function autopilot() {
     for (const b of BOTS) {
-      const hours = parseFloat(Store.botConfig(b.id).auto || 0); if (!hours || isOff(b) || ui.running[b.id] || missingNeeds(b)) continue;
+      const hours = parseFloat(Store.botConfig(b.id).auto || 0); if (!hours || isOff(b) || !shown(b) || ui.running[b.id] || missingNeeds(b)) continue;
       if (window.EB_CLOUD && window.EB_CLOUD.runsBot(b.id)) continue; // the cloud runs this one
       const last = lastRun(b.id); if (last && Date.now() - Date.parse(last.startedAt) < hours * 3600e3) continue;
       runBot(b, true); break;
@@ -239,12 +240,12 @@
   }
 
   function viewBots() {
-    const cats = [...new Set(BOTS.map(b => b.category))];
-    return `${header("Bots", `${BOTS.filter(b => !isOff(b)).length} active of ${BOTS.length} · tap Run, or switch on Autopilot on Home`)}
+    const list0 = BOTS.filter(shown), cats = [...new Set(list0.map(b => b.category))], hiddenN = BOTS.length - list0.length;
+    return `${header("Bots", `${list0.filter(b => !isOff(b)).length} automatic bots · they make, check and list products; you tap Approve`)}
       <button class="primary wide" data-act="run-all">${ic("bolt")} Run all bots</button>
-      ${cats.map(cat => { const list = BOTS.filter(b => b.category === cat && !isOff(b)); return list.length ? `<h2>${esc(cat)}</h2>${list.map(botCard).join("")}` : ""; }).join("")}
-      ${BOTS.some(isOff) ? `<h2>Switched off</h2><div class="card list">${BOTS.filter(isOff).map(b => `<button class="row" data-act="bot-settings" data-bot="${b.id}"><span class="tile sm">${ic(b.icon)}</span><div><b>${esc(b.title)}</b><span>${esc(b.earnsVia)}</span></div>${ic("back", "chev")}</button>`).join("")}</div>` : ""}
-      <p class="foot">More bots can be added any time: each one is a small plug-in.</p>`;
+      ${cats.map(cat => { const list = list0.filter(b => b.category === cat && !isOff(b)); return list.length ? `<h2>${esc(cat)}</h2>${list.map(botCard).join("")}` : ""; }).join("")}
+      ${list0.some(isOff) ? `<h2>Switched off</h2><div class="card list">${list0.filter(isOff).map(b => `<button class="row" data-act="bot-settings" data-bot="${b.id}"><span class="tile sm">${ic(b.icon)}</span><div><b>${esc(b.title)}</b><span>${esc(b.earnsVia)}</span></div>${ic("back", "chev")}</button>`).join("")}</div>` : ""}
+      <p class="foot">${hiddenN ? `${hiddenN} bots that need you to upload or do work by hand are hidden. <button class="linkbtn" data-act="show-manual">Show them</button>` : `<button class="linkbtn" data-act="hide-manual">Hide bots that need manual work</button>`}</p>`;
   }
   function botCard(b) {
     const r = lastRun(b.id), run = ui.running[b.id], miss = missingNeeds(b);
@@ -479,6 +480,8 @@
       case "close": return closeSheet();
       case "run": return runBot(botById(el.dataset.bot));
       case "run-all": return runAll();
+      case "show-manual": await Store.setConfig({ showManual: true }); toast("Showing all bots, including ones that need manual work"); return render();
+      case "hide-manual": await Store.setConfig({ showManual: false }); return render();
       case "bot-settings": return openSheet({ type: "bot", id: el.dataset.bot });
       case "approve": if (it) { if (ui.sheet?.type === "item") closeSheet(); toast("Approved. Find it in your Library."); await window.EB_AUTO.approve(it); } return;
       case "reject": if (it) { await Store.patch("items", id, { status: "rejected" }); if (ui.sheet?.type === "item") closeSheet(); } return;

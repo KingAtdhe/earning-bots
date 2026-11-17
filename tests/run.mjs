@@ -29,6 +29,7 @@ async function page(mode) {
   if (mode === "claude") await pg.addInitScript(claudeMode);
   if (mode === "android") await pg.addInitScript(androidMode);
   await pg.goto(URL0); await pg.waitForFunction(() => window.EB && window.EB.Store.S.ready, null, { timeout: 15000 });
+  await pg.evaluate(() => window.EB.Store.setConfig({ showManual: true })); // tests exercise every bot
   return { pg, ctx };
 }
 const runBot = (pg, id) => pg.evaluate(async id => {
@@ -222,6 +223,8 @@ console.log("New bots: digital planner, digital paper, party games, card decks; 
   check("KDP full cover matches KDP's size formula (trim x2 + spine + bleed)", near(r.kdp.nb[1], 12 + r.kdp.nb[0] * 0.002252 + 0.25) && near(r.kdp.nb[2], 9.25) && near(r.kdp.col[1], 17 + r.kdp.col[0] * 0.002252 + 0.25) && near(r.kdp.col[2], 11.25), JSON.stringify(r.kdp));
   check("pins come in 3 layouts at 2:3", r.pins.every(([w, h]) => w === 500 && h === 750), JSON.stringify(r.pins));
   check("7 shirt design styles", r.shirtStyles === 7);
+  const vis = await pg.evaluate(async () => { await window.EB.Store.setConfig({ showManual: false }); document.querySelector("#nav [data-tab=home]").click(); await new Promise(r => setTimeout(r, 50)); document.querySelector("#nav [data-tab=bots]").click(); await new Promise(r => setTimeout(r, 100)); const ids = () => [...document.querySelectorAll("[data-act=run][data-bot]")].map(b => b.dataset.bot); const before = ids(); document.querySelector("[data-act=show-manual]").click(); await new Promise(r => setTimeout(r, 300)); const after = ids(); return { before, after }; });
+  check("bots that need manual work are hidden; one tap shows them", !vis.before.includes("gig_bot") && !vis.before.includes("notebooks") && vis.before.includes("coloring_books") && vis.before.includes("planner_bot") && vis.after.includes("gig_bot"), JSON.stringify(vis));
   check("no page errors", pg.errors.length === 0, pg.errors.join(" | "));
   await ctx.close();
 }
@@ -232,8 +235,9 @@ console.log("Android (publishing to Etsy, Printify, Pinterest)");
   for (const id of ["niche_research", "calendar_bot", "pod_designs", "wall_art", "worksheets", "cards_bot"]) { const run = await runBot(pg, id); check(`bot ${id} runs`, run && run.status === "ok", run ? run.summary : ""); }
   const niche = await pg.evaluate(() => Object.values(window.EB.Store.S.items).find(i => i.kind === "niche" && i.data.etsy).data.etsy);
   check("research reads the live market: price range, top tags, newcomers", niche.p25 > 0 && niche.p75 > niche.p25 && niche.tags.some(t => t[0] === "weekly planner") && niche.freshWin > 0 && niche.digitalShare === 80, JSON.stringify(niche).slice(0, 300));
+  await pg.evaluate(() => window.EB.Store.setConfig({ auto: { ...(window.EB.Store.config().auto || {}), etsyPublish: false } }));
   await pg.click("#nav [data-tab=inbox]"); await pg.evaluate(() => document.querySelector("[data-act=approve-all]").click()); await pg.waitForTimeout(800);
-  check("approving does not upload unless upload-on-approve is on", await pg.evaluate(() => !window.__req.some(r => r[1].includes("/shops/77/listings") && r[0] === "POST")));
+  check("with upload-on-approve switched off, approving only queues", await pg.evaluate(() => !window.__req.some(r => r[1].includes("/shops/77/listings") && r[0] === "POST")));
   await runBot(pg, "pin_bot");
   await pg.click("#nav [data-tab=inbox]"); await pg.evaluate(() => document.querySelector("[data-act=approve-all]") && document.querySelector("[data-act=approve-all]").click()); await pg.waitForTimeout(500);
   // first Etsy file upload fails once -> the item records an error, then a retry resumes it
@@ -252,6 +256,15 @@ console.log("Android (publishing to Etsy, Printify, Pinterest)");
   check("everything approved got published", res.left === 0 && res.printify > 0 && res.pins > 0, JSON.stringify(res));
   check("daily limit counter tracked", await pg.evaluate(() => (window.EB.Store.config().auto.counts || {}).Etsy > 0));
   check("no page errors", pg.errors.length === 0, pg.errors.join(" | "));
+  // default: approving publishes straight away, and books go to Etsy as printables with their own listing
+  await pg.evaluate(() => window.EB.Store.setConfig({ auto: { ...(window.EB.Store.config().auto || {}), etsyPublish: undefined } }));
+  await runBot(pg, "coloring_books");
+  const book = await pg.evaluate(async () => { const it = Object.values(window.EB.Store.S.items).find(i => i.kind === "kdpbook" && i.data.type === "coloring" && i.status === "pending"); await window.EB_AUTO.approve(it); const post = window.__req.filter(r => r[0] === "POST" && /\/shops\/77\/listings$/.test(r[1])).pop(); const f = window.EB.Store.S.items[it.id]; return { listed: f.status, etsyId: f.data.etsyId, body: String(post && post[2] || "") }; });
+  check("approving publishes right away by default (coloring book as an Etsy printable)", book.listed === "listed" && !!book.etsyId, JSON.stringify(book).slice(0, 300));
+  check("books use their own Etsy listing text and price, not the paperback's", /Printable/.test(decodeURIComponent(book.body.replace(/\+/g, " "))) && /price=4\.50/.test(book.body), book.body.slice(0, 300));
+  // Listing Optimizer changes reach live Etsy listings
+  const upd = await pg.evaluate(async () => { const it = Object.values(window.EB.Store.S.items).find(i => i.data.etsyId && i.kind === "printable"); await window.EB.Store.patch("items", it.id, { data: { ...it.data, title: it.data.title + " Updated", etsyNeedsUpdate: true } }); const n = await window.EB_AUTO.pushEtsyUpdates(); return [n, window.__req.some(r => r[0] === "PATCH" && r[1].includes(`/listings/${it.data.etsyId}`) && String(r[2]).includes("Updated"))]; });
+  check("better titles and tags are pushed to live Etsy listings", upd[0] === 1 && upd[1], JSON.stringify(upd));
   await ctx.close();
 }
 
