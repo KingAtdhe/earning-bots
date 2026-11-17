@@ -5,7 +5,7 @@
   const { BOTS, KINDS, PLATFORMS } = window.EB_BOTS;
   const M = window.EB_MEDIA;
   const S = Store.S, esc = U.esc;
-  const VERSION = "3.1";
+  const VERSION = "3.2";
 
   const ICONS = {
     home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
@@ -223,7 +223,7 @@
     const pubs = items().filter(i => i.publishError && i.status !== "listed");
     if (!runs.length && !pubs.length) return "";
     return `<h2>Needs attention</h2><div class="card list problems">${runs.map(r => `<div class="row static"><span class="tile sm err">${ic("x")}</span><div><b>${esc(botById(r.bot)?.title || r.bot)}</b><span>${esc(r.summary)}</span></div><button class="ghost" data-act="run" data-bot="${esc(r.bot)}">Retry</button></div>`).join("")}
-      ${pubs.map(i => `<div class="row static"><span class="tile sm err">${ic("x")}</span><div><b>${esc(i.title)}</b><span>${esc(i.publishError)}</span></div><button class="ghost" data-act="etsy-publish" data-id="${esc(i.id)}">Retry</button></div>`).join("")}</div>`;
+      ${pubs.map(i => `<div class="row static"><span class="tile sm err">${ic("x")}</span><div><b>${esc(i.title)}</b><span>${esc(i.publishError)}</span></div><button class="ghost" data-act="publish-one" data-id="${esc(i.id)}">Retry</button></div>`).join("")}</div>`;
   }
   function winnersCard() {
     const w = window.EB_WIN.winners(3); if (!w.length) return "";
@@ -471,7 +471,7 @@
       case "reject": if (it) { await Store.patch("items", id, { status: "rejected" }); if (ui.sheet?.type === "item") closeSheet(); } return;
       case "approve-all": case "reject-all": {
         const list = items().filter(i => i.status === "pending" && (ui.inboxBot === "all" || i.bot === ui.inboxBot));
-        for (const i of list) { if (name === "approve-all") await window.EB_AUTO.approve(i, true); else await Store.patch("items", i.id, { status: "rejected" }); }
+        for (const i of list) { if (name === "approve-all") await window.EB_AUTO.approve(i, true, true); else await Store.patch("items", i.id, { status: "rejected" }); }
         return toast(name === "approve-all" ? `${list.length} approved` : `${list.length} rejected`);
       }
       case "kit": {

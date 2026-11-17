@@ -66,13 +66,23 @@
     return made.length;
   }
 
+  // seasonal demand peaks: research and list 8-12 weeks ahead
+  function seasonalSeeds(d = new Date()) {
+    const y = d.getFullYear(), m = d.getMonth(), soon = [m + 1, m + 2, m + 3].map(x => x % 12), out = [];
+    const S = { 0: ["valentines day", "galentines"], 1: ["st patricks day", "easter", "spring cleaning"], 2: ["easter", "mothers day"], 3: ["mothers day", "graduation", "teacher appreciation"], 4: ["fathers day", "graduation", "summer"],
+      5: ["back to school", "summer camp"], 6: ["back to school", "teacher gifts"], 7: ["halloween", "fall decor", "thanksgiving"], 8: ["halloween", "thanksgiving", "christmas"], 9: ["christmas", "holiday", `${y + 1} planner`], 10: ["christmas", `${y + 1} calendar`, "new year goals"], 11: [`${y + 1} planner`, "valentines day", "new year goals"] };
+    for (const k of soon) for (const s of S[k] || []) if (!out.includes(s)) out.push(s);
+    return out.slice(0, 3);
+  }
+
   // ---- research ------------------------------------------------------------------------------------------------
   const TYPES = { printable: "Printable", shirt: "Shirt / sticker design", notebook: "Notebook / journal", wallart: "Wall art", wordsearch: "Word search book", coloring: "Coloring book", ebook: "Ebook / guide" };
   function guessType(k) {
     k = k.toLowerCase();
     if (/shirt|tee|sticker|hoodie|mug/.test(k)) return "shirt";
     if (/notebook|journal|log ?book|diary/.test(k)) return "notebook";
-    if (/wall art|print|poster|decor/.test(k)) return "wallart";
+    if (/planner|printable|tracker|worksheet|calendar|checklist|template|log\b/.test(k) && !/wall art|poster/.test(k)) return "printable";
+    if (/wall art|art print|poster|decor/.test(k)) return "wallart";
     if (/word search|word find|puzzle/.test(k)) return "wordsearch";
     if (/coloring|colouring/.test(k)) return "coloring";
     if (/guide|ebook|course|how to/.test(k)) return "ebook";
@@ -106,7 +116,7 @@
       { key: "perRun", label: "Niches to check per run", type: "number", def: 12, min: 5, max: 25 },
       { key: "autoUse", label: "Feed the best niches to other bots automatically", type: "select", def: "on", options: [["on", "Yes"], ["off", "No, I'll choose"]] }],
     async run(ctx) {
-      const seeds = String(ctx.cfg.seeds || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+      const seeds = [...seasonalSeeds(), ...String(ctx.cfg.seeds || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean)];
       const known = new Set(Object.values(S.items).filter(i => i.kind === "niche").map(i => i.data.keyword));
       let found = [], estimated = false;
       if (Web.available()) {
@@ -178,5 +188,5 @@ Return a JSON array of {"keyword": search phrase buyers type, "type": one of ${O
     summary: it => `Score ${it.data.score}/100 · ${TYPES[it.data.type] || it.data.type}${it.data.etsy ? ` · ${it.data.etsy.count.toLocaleString()} on Etsy` : it.data.estimated ? " · estimate" : ""}`,
   };
 
-  window.EB_WIN = { itemScore, prefer, weightedPick, winners, variations, useNiche, TYPES };
+  window.EB_WIN = { seasonalSeeds, itemScore, prefer, weightedPick, winners, variations, useNiche, TYPES };
 })();

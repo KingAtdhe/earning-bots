@@ -1,4 +1,4 @@
-# Earning Bots 3.1
+# Earning Bots 3.2
 
 Worker bots that make things you can sell or turn into paid work, an approval inbox, a library of
 everything they made, and an earnings dashboard. The same app runs inside Claude and on Android.
@@ -18,6 +18,7 @@ everything they made, and an earnings dashboard. The same app runs inside Claude
 | Job Scanner | Remote jobs (Remotive, Remote OK) and GitHub bounties + proposals | Freelance work, bounties | Android app; Claude for proposals |
 | Deal Finder | Price drops below your buy price on any product page | Reselling | Android app |
 | Listing Optimizer | Better titles and tags for approved/live products | More Etsy views | Claude |
+| Calendar Bot | Dated printable wall calendars for next year (Monday/Sunday start) | Etsy, Gumroad (seasonal) | nothing |
 | Maze Book Bot | Maze activity books with solutions + KDP listing | Amazon KDP | nothing |
 | Coloring Book Bot | Original mandala coloring books | Amazon KDP | nothing |
 | Notebook Bot | Themed 6x9 lined / dot / graph notebooks | Amazon KDP | nothing |
@@ -28,6 +29,18 @@ everything they made, and an earnings dashboard. The same app runs inside Claude
 | Newsletter Bot | Weekly newsletter issue | Sponsors, paid subs | Claude |
 | Social Text Bot | Text posts for X, Threads, LinkedIn, Bluesky; auto-schedules in Metricool (inside Claude) | Audience growth | Claude |
 | Gig Writer | Fiverr / Upwork service listings | Freelance work | Claude |
+
+## Marketplace rules built in (researched Nov 2026)
+- **Etsy** removes listings made without human involvement and requires AI disclosure; AI-written guides and instructions are not allowed. So: marketplace uploads only happen after you approve or tap **Publish**, AI use is disclosed in the listing text, and ebooks are never sent to Etsy.
+- **KDP** limits uploads to about 3 new titles a day and removes books that hide AI-generated content. Every KDP kit says whether to tick the AI box.
+- **Daily limits** (Settings): Etsy 15, Printify 10, Pinterest 20 per day by default.
+- **Seasonal timing**: research adds seasonal keywords 1-3 months ahead, because seasonal items sell when listed 8-12 weeks early.
+- Every printable includes a **low-ink version** (a 2026 buyer trend).
+
+## Publishing connections (Android app)
+- **Etsy**: printables, calendars, wall art and worksheets with photos and files.
+- **Printify**: shirt designs become real t-shirts (print + shipping by Printify) published to your connected Etsy or Shopify store.
+- **Pinterest**: pins posted to your board (public once Pinterest grants your app Standard access).
 
 ## Focus on what sells
 - Etsy sync pulls views and favorites for every listing the bots made. Together with sales this ranks your **winners** (Home).

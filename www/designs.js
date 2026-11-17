@@ -16,6 +16,8 @@
     Mustard: { accent: [176, 132, 30], light: [248, 239, 216] },
   };
   for (const t of Object.values(THEMES)) { t.ink = [55, 55, 55]; t.rule = [196, 196, 196]; }
+  // printer-friendly version: no filled areas, grey lines (hidden from theme lists)
+  Object.defineProperty(THEMES, "LowInk", { enumerable: false, value: { accent: [80, 80, 80], light: [255, 255, 255], ink: [60, 60, 60], rule: [205, 205, 205] } });
 
   const NARROW = new Set("il.,:;|!'ftjI ");
   const WIDE = new Set("mwMW@%");
@@ -273,6 +275,47 @@
     gratitude_journal: ["Gratitude Journal Page", gratitudeJournal],
   };
 
+  // ---- calendars (registered for several years) ----------------------------------------------
+  const MONTHS = ["JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"];
+  function monthGrid(year, m, mon) {
+    const first = new Date(Date.UTC(year, m, 1)).getUTCDay(), days = new Date(Date.UTC(year, m + 1, 0)).getUTCDate();
+    const offset = mon ? (first + 6) % 7 : first;
+    return { offset, days, rows: Math.ceil((offset + days) / 7) };
+  }
+  function calendarMonth(p, year, m, mon) {
+    const y = p.header(`${MONTHS[m]} ${year}`, ["GOALS"]), mm = p.m, w = p.iw, acc = p.th.accent;
+    const heads = mon ? ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"] : ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+    const g = monthGrid(year, m, mon), gh = (p.H - mm - y) * 0.8, cw = w / 7, rh = (gh - 18) / g.rows;
+    p.rect(mm, y, w, 18, null, p.th.light);
+    heads.forEach((h, i) => p.text(mm + cw * i + cw / 2, y + 12.5, 7.5, h, acc, true, "center"));
+    for (let r = 0; r <= g.rows; r++) p.line(mm, y + 18 + r * rh, mm + w, y + 18 + r * rh, r === 0 ? acc : null, r === 0 ? 0.6 : 0.5);
+    for (let c = 1; c < 7; c++) p.line(mm + c * cw, y, mm + c * cw, y + 18 + g.rows * rh);
+    p.rect(mm, y, w, 18 + g.rows * rh, acc, null, 0.8);
+    for (let d = 1; d <= g.days; d++) { const k = g.offset + d - 1; p.text(mm + (k % 7) * cw + 6, y + 18 + Math.floor(k / 7) * rh + 13, 9, String(d), null, true); }
+    const ny = y + 18 + g.rows * rh + p.g, rest = p.H - mm - ny;
+    const t = p.box(mm, ny, w, rest, "NOTES"); p.lines(mm, t, w, rest - 17);
+  }
+  function calendarYear(p, year, mon) {
+    const y = p.header(`${year} AT A GLANCE`), mm = p.m, w = p.iw, acc = p.th.accent;
+    const cols = 3, rows = 4, gx = 14, gy = 12, bw = (w - gx * (cols - 1)) / cols, bh = (p.H - mm - y - gy * (rows - 1)) / rows;
+    for (let m = 0; m < 12; m++) {
+      const bx = mm + (m % cols) * (bw + gx), by = y + Math.floor(m / cols) * (bh + gy), g = monthGrid(year, m, mon), cw = bw / 7, rh = (bh - 34) / 6;
+      p.text(bx + bw / 2, by + 11, 9, MONTHS[m], acc, true, "center");
+      (mon ? "MTWTFSS" : "SMTWTFS").split("").forEach((h, i) => p.text(bx + cw * i + cw / 2, by + 24, 6.5, h, null, true, "center"));
+      p.line(bx, by + 28, bx + bw, by + 28, acc, 0.6);
+      for (let d = 1; d <= g.days; d++) { const k = g.offset + d - 1; p.text(bx + (k % 7) * cw + cw / 2, by + 28 + (Math.floor(k / 7) + 1) * rh - 2, 7, String(d), null, false, "center"); }
+    }
+  }
+  function registerCalendars(year) {
+    for (const mon of [true, false]) {
+      const s = mon ? "mon" : "sun";
+      LAYOUTS[`cal_${year}_year_${s}`] = [`${year} Year at a Glance`, p => calendarYear(p, year, mon)];
+      for (let m = 0; m < 12; m++) LAYOUTS[`cal_${year}_${String(m + 1).padStart(2, "0")}_${s}`] = [`${MONTHS[m][0] + MONTHS[m].slice(1).toLowerCase()} ${year}`, p => calendarMonth(p, year, m, mon)];
+    }
+  }
+  const thisYear = new Date().getFullYear();
+  for (let yy = thisYear - 1; yy <= thisYear + 2; yy++) registerCalendars(yy);
+
   function buildPage(key, sizeName, themeName) {
     const p = new Page(SIZES[sizeName], THEMES[themeName]);
     LAYOUTS[key][1](p);
@@ -325,13 +368,15 @@
     const names = bundle.pages.map(k => LAYOUTS[k][0]), n = names.length;
     let title = `${bundle.name}, ${theme} Minimalist Printable, A4 & US Letter PDF, Undated, Instant Download`;
     if (title.length > 140) title = `${bundle.name}, ${theme} Printable PDF, A4 & US Letter`.slice(0, 140);
+    if (bundle.dated) title = `${bundle.name}, ${theme} Printable PDF, A4 & US Letter, ${bundle.weekStart || "Monday"} Start, Instant Download`.slice(0, 140);
     const description = `${bundle.intro}
 
 WHAT'S INCLUDED
 ${names.map(x => "- " + x).join("\n")}
 - ${n} page${n === 1 ? "" : "s"}, each in A4 and US Letter size (2 PDF files)
 - ${theme} colour theme with a clean, minimalist design
-- Undated, so you can use it any year and print it as often as you like
+- ${bundle.dated ? `Dated ${bundle.dated}, ${bundle.weekStart || "Monday"} start` : "Undated, so you can use it any year and print it as often as you like"}
+- Low-ink version included to save printer ink
 
 HOW IT WORKS
 1. Buy and download the files instantly
@@ -392,13 +437,13 @@ PLEASE NOTE
     }
   }
 
-  function makePdf(product, sizeName) {
+  function makePdf(product, sizeName, lowInk) {
     const size = SIZES[sizeName];
     const doc = new window.jspdf.jsPDF({ unit: "pt", format: size, compress: true });
     doc.setProperties({ title: product.shortName });
     product.bundle.pages.forEach((key, i) => {
       if (i > 0) doc.addPage(size);
-      pageToPdf(doc, buildPage(key, sizeName, product.theme).shapes);
+      pageToPdf(doc, buildPage(key, sizeName, lowInk ? "LowInk" : product.theme).shapes);
     });
     return doc.output("blob");
   }
@@ -446,7 +491,7 @@ PLEASE NOTE
     const by = H * 0.9; ctx.fillStyle = css(th.accent); ctx.fillRect(0, by, W, H - by);
     const n = product.bundle.pages.length;
     ctx.fillStyle = "#fff"; ctx.font = `700 ${W * 0.02}px Inter, Helvetica, Arial, sans-serif`; ctx.textBaseline = "middle";
-    ctx.fillText(`${n} PAGE${n === 1 ? "" : "S"}  ·  UNDATED  ·  ${product.theme.toUpperCase()} THEME`, W / 2, by + (H - by) / 2);
+    ctx.fillText(`${n} PAGE${n === 1 ? "" : "S"}  ·  ${product.bundle.dated ? "DATED " + product.bundle.dated : "UNDATED"}  ·  ${product.theme.toUpperCase()} THEME`, W / 2, by + (H - by) / 2);
     return cv;
   }
 
@@ -464,5 +509,5 @@ PLEASE NOTE
 
   const canvasBlob = (cv, type = "image/png", q) => new Promise(res => cv.toBlob(res, type, q));
 
-  window.EB_DESIGNS = { SIZES, THEMES, LAYOUTS, BUNDLES, listingCopy, cleanTags, makePdf, coverCanvas, pageCanvas, canvasBlob };
+  window.EB_DESIGNS = { MONTHS, SIZES, THEMES, LAYOUTS, BUNDLES, listingCopy, cleanTags, makePdf, coverCanvas, pageCanvas, canvasBlob };
 })();

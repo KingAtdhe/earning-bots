@@ -56,18 +56,52 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
         if (pending.length - approved.length) notes.push(`${pending.length - approved.length} held back for you to check`);
       } catch (e) { notes.push("Review skipped: " + e.message); }
     }
-    for (const it of approved) await approve(it, true);
+    for (const it of approved) await approve(it, true, false);
     if (approved.length) notes.unshift(`${approved.length} auto-approved`);
     return notes.join(". ");
   }
 
-  async function approve(it, quiet) {
-    await Store.patch("items", it.id, { status: PIPELINE.includes(it.kind) ? "new" : "approved", approvedAt: U.now() });
+  // Marketplaces (Etsy especially) remove listings made "without any human involvement", so anything that
+  // goes to a marketplace is only published after a person approves it or taps Publish.
+  async function approve(it, quiet, human = true) {
+    await Store.patch("items", it.id, { status: PIPELINE.includes(it.kind) ? "new" : "approved", approvedAt: U.now(), autoApproved: !human });
     const fresh = S.items[it.id];
     try {
-      if (Etsy.canPublish(fresh) && auto().etsyPublish) { await Etsy.publish(fresh); if (!quiet) toast("Published on Etsy"); }
       if (fresh.kind === "post" && Store.botConfig("social_poster").autoSchedule === "on" && mcp && auto().metricool) { await Metricool.schedule(fresh); if (!quiet) toast("Scheduled in Metricool"); }
+      if (human && auto().etsyPublish && destination(fresh)) { const where = await publishItem(fresh); if (!quiet && where) toast(`Published on ${where}`); }
     } catch (e) { await Store.patch("items", it.id, { publishError: e.message }); toast(e.message, "error"); }
+  }
+
+  // ---- publishing with daily limits ---------------------------------------------------------------
+  const CAPS = { Etsy: 15, Printify: 10, Pinterest: 20 };
+  function destination(it) {
+    const C = window.EB_CONNECT;
+    if (!it || it.status === "listed" || it.status === "pending" || it.status === "rejected") return "";
+    if (Etsy.canPublish(it)) return "Etsy";
+    if (it.kind === "design" && C.Printify.ready() && !(it.links || {}).Printify) return "Printify";
+    if (it.kind === "pin" && C.Pinterest.ready() && !(it.links || {}).Pinterest) return "Pinterest";
+    return "";
+  }
+  function usedToday(where) { const c = auto().counts || {}; return c.date === new Date().toISOString().slice(0, 10) ? c[where] || 0 : 0; }
+  async function bump(where) { const today = new Date().toISOString().slice(0, 10), c = auto().counts || {}; const n = c.date === today ? { ...c } : { date: today }; n[where] = (n[where] || 0) + 1; await setAuto({ counts: n }); }
+  async function publishItem(it) {
+    const where = destination(it); if (!where) return "";
+    const cap = Number(auto()[`cap${where}`] || CAPS[where]);
+    if (usedToday(where) >= cap) throw new Error(`Daily ${where} limit reached (${cap}). It will publish tomorrow; this keeps your shop safe from spam flags.`);
+    const C = window.EB_CONNECT;
+    if (where === "Etsy") await Etsy.publish(it);
+    else if (where === "Printify") await C.Printify.publish(it);
+    else if (where === "Pinterest") await C.Pinterest.post(it, KINDS.pin.thumb(it, 1000));
+    await bump(where); return where;
+  }
+  async function publishAll() {
+    const queue = Object.values(S.items).filter(i => destination(i)).sort((a, b) => (a.approvedAt || "").localeCompare(b.approvedAt || ""));
+    let ok = 0, stop = "";
+    for (const it of queue) {
+      try { if (await publishItem(it)) ok++; }
+      catch (e) { if (/Daily .* limit/.test(e.message)) { stop = e.message; continue; } await Store.patch("items", it.id, { publishError: e.message }); }
+    }
+    toast(`${ok} published${stop ? ". Some wait for tomorrow's limit." : ""}`, ok ? "ok" : "error");
   }
 
   // ---- Metricool (inside Claude) -----------------------------------------------------------------
@@ -120,7 +154,8 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
 
   // ---- Etsy (Android app) --------------------------------------------------------------------------
   const ETSY_API = "https://api.etsy.com/v3/application", REDIRECT = "https://localhost/etsy-callback.html";
-  const ETSY_KINDS = { printable: ["calendars & planners", "planners"], wallart: ["prints", "digital prints"], worksheet: ["worksheets", "educational", "learning"], ebook: ["guides", "books"], design: null };
+  // ebooks are left out on purpose: Etsy requires guides and instructions to be the seller's own work, not AI-written
+  const ETSY_KINDS = { printable: ["calendars & planners", "planners"], wallart: ["prints", "digital prints"], worksheet: ["worksheets", "educational", "learning"], design: null };
   const Etsy = {
     connected: () => !!LS.get("eb_etsy_token", null),
     key() { const k = LS.get("eb_etsy_key", ""), s = LS.get("eb_etsy_secret", ""); return s ? `${k}:${s}` : k; },
@@ -174,18 +209,18 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     async publish(it) {
       const t = await Etsy.token(), d = it.data, shop = t.shop_id;
       toast(`Publishing “${(d.title || it.title).slice(0, 40)}” on Etsy...`);
-      const listing = await Etsy.api("POST", `/shops/${shop}/listings`, { quantity: 999, title: String(d.title || it.title).slice(0, 140), description: d.description || "", price: Number(it.price || d.price || 4.9).toFixed(2),
+      const disclosure = d.aiUsed ? "\n\nHOW THIS WAS MADE\nDesigned by our shop. The text in this design was written with the help of AI and reviewed by us before listing." : "";
+      const listing = await Etsy.api("POST", `/shops/${shop}/listings`, { quantity: 999, title: String(d.title || it.title).slice(0, 140), description: (d.description || "") + disclosure, price: Number(it.price || d.price || 4.9).toFixed(2),
         who_made: "i_did", when_made: "made_to_order", taxonomy_id: await Etsy.taxonomy(it.kind), type: "download", is_supply: "false", tags: (d.tags || []).slice(0, 13).join(",") });
       const id = listing.listing_id, imgs = [], files = [];
       if (it.kind === "printable") {
         const p = { bundle: d.bundle, theme: d.theme, shortName: d.shortName, title: d.title };
         imgs.push(D.coverCanvas(p, 2000)); d.bundle.pages.slice(0, 9).forEach(k => imgs.push(D.pageCanvas(p, k, 2000)));
-        for (const size of Object.keys(D.SIZES)) files.push([`${U.slug(d.shortName)}-${size}.pdf`, D.makePdf(p, size)]);
+        for (const size of Object.keys(D.SIZES)) { files.push([`${U.slug(d.shortName)}-${size}.pdf`, D.makePdf(p, size)]); files.push([`${U.slug(d.shortName)}-${size}-low-ink.pdf`, D.makePdf(p, size, true)]); }
       } else if (it.kind === "wallart") {
         imgs.push(A.roomMockup(it, 2000), A.artCanvas(it, "2x3", 2000));
         for (const [key] of A.SIZES) files.push([`${U.slug(d.title).slice(0, 40)}-${key}.jpg`, await Files.canvasBlob(A.artCanvas(it, key, 4500), "image/jpeg", 0.93)]);
       } else if (it.kind === "worksheet") { imgs.push(K.cover(it, 2000)); files.push([`${U.slug(d.title)}.pdf`, K.interior(it)]); }
-      else if (it.kind === "ebook") { imgs.push(A.ebookCover(it, 1600)); files.push([`${U.slug(d.title)}.pdf`, A.ebookPdf(it)]); }
       for (let i = 0; i < imgs.length && i < 10; i++) { const f = new FormData(); f.append("image", await Files.canvasBlob(imgs[i], "image/jpeg", 0.9), `photo-${i + 1}.jpg`); f.append("rank", String(i + 1)); await Etsy.api("POST", `/shops/${shop}/listings/${id}/images`, f, true); }
       for (let i = 0; i < files.length && i < 5; i++) { const f = new FormData(); f.append("file", files[i][1], files[i][0]); f.append("name", files[i][0]); f.append("rank", String(i + 1)); await Etsy.api("POST", `/shops/${shop}/listings/${id}/files`, f, true); }
       if (auto().etsyActivate !== false) await Etsy.api("PATCH", `/shops/${shop}/listings/${id}`, { state: "active" });
@@ -252,7 +287,10 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     if (a.etsyPublish && Etsy.connected()) parts.push("Etsy auto-publish");
     if (a.gmailDrafts) parts.push("Gmail drafts"); if (a.metricool) parts.push("Metricool");
     if (a.salesSync) parts.push("sales sync");
-    return `<section class="card autopilot ${a.autopilot ? "on" : ""}"><div class="ap-head"><div><b>Autopilot</b><span>${a.autopilot ? esc(parts.join(" · ")) : "Bots only run when you tap Run"}</span></div>
+    const queue = Object.values(S.items).filter(i => destination(i));
+    const qhtml = queue.length ? `<section class="card publishq"><div class="ap-head"><div><b>${queue.length} ready to publish</b><span>${[...new Set(queue.map(destination))].join(", ")} · you approve, the app uploads</span></div>
+      <button class="primary" data-act="publish-all">Publish</button></div></section>` : "";
+    return qhtml + `<section class="card autopilot ${a.autopilot ? "on" : ""}"><div class="ap-head"><div><b>Autopilot</b><span>${a.autopilot ? esc(parts.join(" · ")) : "Bots only run when you tap Run"}</span></div>
       <button class="switch ${a.autopilot ? "on" : ""}" data-act="autopilot" aria-pressed="${!!a.autopilot}" aria-label="Autopilot"><i></i></button></div>
       ${a.autopilot ? `<p class="hint">Runs while the app is open. Keep it open (or check in daily) and new work, approvals and sales keep flowing.</p>` : ""}</section>`;
   }
@@ -260,7 +298,7 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     const a = auto(), m = a.metricool, tok = LS.get("eb_etsy_token", null);
     let h = `<h4>Automation</h4><form class="autoform">
       <label class="check"><input type="checkbox" name="salesSync" ${a.salesSync ? "checked" : ""}> Sync sales automatically every 6 hours${IS_NATIVE ? "" : " (Android app)"}</label>`;
-    if (IS_NATIVE) h += `<label class="check"><input type="checkbox" name="etsyPublish" ${a.etsyPublish ? "checked" : ""}> Publish approved products on Etsy automatically</label>
+    if (IS_NATIVE) h += `<label class="check"><input type="checkbox" name="etsyPublish" ${a.etsyPublish ? "checked" : ""}> When I approve a product, upload it right away (Etsy, Printify, Pinterest)</label>
       <label class="check"><input type="checkbox" name="etsyActivate" ${a.etsyActivate !== false ? "checked" : ""}> Make Etsy listings live right away (USD 0.20 each), otherwise save as drafts</label>`;
     if (IN_CLAUDE) h += `<label class="check"><input type="checkbox" name="gmailDrafts" ${a.gmailDrafts ? "checked" : ""}> Put Client Finder pitches in Gmail as drafts (never sent automatically)</label>`;
     h += `<button class="ghost">Save automation</button></form>`;
@@ -269,6 +307,16 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
         : `<form class="etsyform"><p class="hint">Create an app at etsy.com/developers with the callback URL ${REDIRECT}, then paste its keys here.</p>
         <div class="two"><label>Keystring<input name="key" value="${esc(LS.get("eb_etsy_key", ""))}" autocomplete="off"></label><label>Shared secret<input name="secret" type="password" value="${esc(LS.get("eb_etsy_secret", ""))}" autocomplete="off"></label></div>
         <button class="primary">Connect Etsy</button></form>`}`;
+    }
+    if (IS_NATIVE) {
+      const pfShop = LS.get("eb_printify_shop", null), pinBoard = LS.get("eb_pinterest_board", null);
+      h += `<h4>Printify (shirts on your Etsy or Shopify)</h4><p class="hint">Printify prints and ships. Create a token at printify.com > Account > Connections and connect your Etsy or Shopify store inside Printify.</p>
+        <form class="tokenform" data-key="eb_printify_token"><label>Personal access token<input name="token" type="password" value="${esc(LS.get("eb_printify_token", ""))}" autocomplete="off"></label><button class="ghost">Save token</button></form>
+        ${pfShop ? `<p class="muted">Publishing to <b>${esc(pfShop.title)}</b>.</p>` : ""}<div class="btns wrap"><button class="ghost" data-act="printify-shops">${pfShop ? "Change shop" : "Load my shops"}</button></div><div id="pfshops"></div>
+        <h4>Pinterest (pins)</h4><p class="hint">Create an app at developers.pinterest.com and generate an access token with pins:write and boards:read. Until Pinterest approves your app for Standard access, posted pins are only visible to you.</p>
+        <form class="tokenform" data-key="eb_pinterest_token"><label>Access token<input name="token" type="password" value="${esc(LS.get("eb_pinterest_token", ""))}" autocomplete="off"></label><button class="ghost">Save token</button></form>
+        ${pinBoard ? `<p class="muted">Pinning to <b>${esc(pinBoard.name)}</b>.</p>` : ""}<div class="btns wrap"><button class="ghost" data-act="pinterest-boards">${pinBoard ? "Change board" : "Load my boards"}</button></div><div id="pinboards"></div>
+        <h4>Daily publishing limits</h4><form class="capform"><div class="two"><label>Etsy per day<input name="capEtsy" type="number" min="1" max="50" value="${esc(a.capEtsy || CAPS.Etsy)}"></label><label>Printify per day<input name="capPrintify" type="number" min="1" max="50" value="${esc(a.capPrintify || CAPS.Printify)}"></label></div><button class="ghost">Save limits</button></form>`;
     }
     if (IN_CLAUDE) {
       h += `<h4>Metricool (social scheduling)</h4>${m ? `<p class="muted">Posting as <b>${esc(m.label)}</b> (${esc(m.timezone)}).</p>` : `<p class="muted">Pick the brand the Social Text Bot should schedule posts for.</p>`}
@@ -288,6 +336,18 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
         return "keep";
       }
       case "metricool-pick": await setAuto({ metricool: { blogId: el.dataset.blog, label: el.dataset.label, timezone: el.dataset.tz } }); toast(`Metricool brand: ${el.dataset.label}`); window.EB_APP.closeSheet(); return true;
+      case "publish-all": await publishAll(); return true;
+      case "publish-one": { const it = S.items[el.dataset.id]; try { const w = await publishItem(it); toast(w ? `Published on ${w}` : "Nothing to publish"); } catch (e) { await Store.patch("items", it.id, { publishError: e.message }); toast(e.message, "error"); } return true; }
+      case "printify-shops": case "pinterest-boards": {
+        const pf = name === "printify-shops", box = document.getElementById(pf ? "pfshops" : "pinboards"); box.innerHTML = `<p class="muted"><span class="spin"></span> Loading...</p>`;
+        try {
+          const list = pf ? (await window.EB_CONNECT.Printify.shops()).map(s => ({ id: s.id, label: s.title, sub: s.sales_channel })) : (await window.EB_CONNECT.Pinterest.boards()).map(b => ({ id: b.id, label: b.name, sub: "" }));
+          box.innerHTML = list.length ? `<div class="list mini">${list.map(x => `<button class="row" data-act="${pf ? "printify-pick" : "pinterest-pick"}" data-id="${esc(x.id)}" data-label="${esc(x.label)}"><div><b>${esc(x.label)}</b><span>${esc(x.sub || "")}</span></div></button>`).join("")}</div>` : `<p class="muted">Nothing found.</p>`;
+        } catch (e) { box.innerHTML = `<p class="hint">${esc(e.message)}</p>`; }
+        return "keep";
+      }
+      case "printify-pick": LS.set("eb_printify_shop", { id: el.dataset.id, title: el.dataset.label }); try { localStorage.removeItem("eb_printify_bp"); } catch { /* ignore */ } toast(`Printify shop: ${el.dataset.label}`); return true;
+      case "pinterest-pick": LS.set("eb_pinterest_board", { id: el.dataset.id, name: el.dataset.label }); toast(`Pinterest board: ${el.dataset.label}`); return true;
       case "schedule-post": { const it = S.items[el.dataset.id]; try { await Metricool.schedule(it); toast("Scheduled in Metricool"); } catch (e) { toast(e.message, "error"); } return true; }
       case "etsy-publish": { const it = S.items[el.dataset.id]; try { await Etsy.publish(it); toast("Published on Etsy"); } catch (e) { toast(e.message, "error"); } return true; }
       case "gmail-draft": { const it = S.items[el.dataset.id]; try { const r = await callTool(GMAIL, "create_draft", { to: [it.data.email], subject: it.data.pitchSubject, body: it.data.pitchBody }); await Store.patch("items", it.id, { data: { ...it.data, draftId: r?.id || "draft", draftUrl: r?.viewUrl || "" } }); toast("Draft saved in Gmail"); } catch (e) { toast(e.message, "error"); } return true; }
@@ -299,6 +359,8 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
       await setAuto({ salesSync: fd.has("salesSync"), ...(IS_NATIVE ? { etsyPublish: fd.has("etsyPublish"), etsyActivate: fd.has("etsyActivate") } : {}), ...(IN_CLAUDE ? { gmailDrafts: fd.has("gmailDrafts") } : {}) });
       toast("Automation saved"); return true;
     }
+    if (f.classList.contains("tokenform")) { LS.set(f.dataset.key, String(fd.get("token")).trim()); toast("Token saved"); return true; }
+    if (f.classList.contains("capform")) { await setAuto({ capEtsy: Math.max(1, parseInt(fd.get("capEtsy"), 10) || 15), capPrintify: Math.max(1, parseInt(fd.get("capPrintify"), 10) || 10) }); toast("Limits saved"); return true; }
     if (f.classList.contains("etsyform")) {
       LS.set("eb_etsy_key", String(fd.get("key")).trim()); LS.set("eb_etsy_secret", String(fd.get("secret")).trim());
       try { await Etsy.connect(); } catch (e) { toast(e.message, "error"); } return true;
@@ -307,7 +369,9 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
   }
   function itemActions(it) {
     const out = [];
-    if (Etsy.canPublish(it) && it.status !== "pending") out.push(`<button class="primary" data-act="etsy-publish" data-id="${esc(it.id)}">Publish on Etsy</button>`);
+    const where = destination(it);
+    if (where) out.push(`<button class="primary" data-act="publish-one" data-id="${esc(it.id)}">Publish on ${where}</button>`);
+    if (it.autoApproved && it.status === "approved") out.push(`<p class="hint">Approved automatically. It goes to marketplaces only when you tap Publish.</p>`);
     if (it.kind === "post" && it.status !== "pending" && !it.data.scheduledFor && mcp) out.push(`<button class="primary" data-act="schedule-post" data-id="${esc(it.id)}">Schedule in Metricool</button>`);
     if (it.kind === "lead" && it.data.email && mcp && !it.data.draftId) out.push(`<button class="ghost" data-act="gmail-draft" data-id="${esc(it.id)}">Draft in Gmail</button>`);
     if (it.data.draftUrl) out.push(`<button class="ghost" data-act="open" data-url="${esc(it.data.draftUrl)}">Open Gmail draft</button>`);
@@ -326,6 +390,8 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
     if (IS_NATIVE) {
       await check("Web access", async () => { await Web.text("https://api.github.com/zen"); });
       await check("Etsy", async () => { if (!Etsy.connected()) throw new Error("Not connected (Settings)"); const t = await Etsy.token(); await Etsy.api("GET", `/shops/${t.shop_id}`); return `Connected to ${t.shop_name}`; });
+      await check("Printify", async () => { if (!LS.get("eb_printify_token", "")) throw new Error("No token (Settings)"); const s = await window.EB_CONNECT.Printify.shops(); return `${s.length} shop(s)${LS.get("eb_printify_shop", null) ? "" : ", pick one in Settings"}`; });
+      await check("Pinterest", async () => { if (!LS.get("eb_pinterest_token", "")) throw new Error("No token (Settings)"); const b = await window.EB_CONNECT.Pinterest.boards(); return `${b.length} board(s)`; });
       await check("Gumroad", async () => { const k = LS.get("eb_gumroad", ""); if (!k) throw new Error("No token (Settings)"); await Web.json(`https://api.gumroad.com/v2/user?access_token=${encodeURIComponent(k)}`); });
     }
     if (IN_CLAUDE) {
@@ -345,5 +411,5 @@ Return a JSON array of {"id": "...", "score": number, "issue": "short reason if 
   }
 
   setTimeout(() => Etsy.finish(), 1500);
-  window.EB_AUTO = { diagnostics, reminders, afterRun, approve, periodic, syncSales, approveField, homeCard, settingsSection, handleAct, handleSubmit, itemActions, Etsy, Metricool };
+  window.EB_AUTO = { publishAll, destination, diagnostics, reminders, afterRun, approve, periodic, syncSales, approveField, homeCard, settingsSection, handleAct, handleSubmit, itemActions, Etsy, Metricool };
 })();
